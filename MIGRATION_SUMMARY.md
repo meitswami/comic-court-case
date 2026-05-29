@@ -59,7 +59,7 @@ cp .env.example .env
 ```
 
 ### 3. Run MySQL Migrations
-Go to phpMyAdmin (https://auth-db1274.hstgr.io/) and run each migration file in order:
+Go to phpMyAdmin (https://<YOUR_DB_HOST>/) and run each migration file in order:
 1. `001_initial_schema.sql`
 2. `002_case_intake_and_reports.sql`
 3. `003_user_roles_and_admin.sql`
@@ -88,10 +88,10 @@ Replace Supabase calls with MySQL client:
 
 ## 🔑 Database Credentials (Already Configured)
 
-- **Host:** auth-db1274.hstgr.io
-- **Database:** u334425891_ecourtcase
-- **Username:** u334425891_ecourtcase
-- **Password:** U9OevrCbw!
+- **Host:** <YOUR_DB_HOST>
+- **Database:** <YOUR_DB_USER_OR_NAME>
+- **Username:** <YOUR_DB_USER_OR_NAME>
+- **Password:** <YOUR_DB_PASSWORD>
 
 ## 📁 File Structure Created
 

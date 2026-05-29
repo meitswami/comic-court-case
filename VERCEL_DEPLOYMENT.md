@@ -23,11 +23,11 @@ I've configured your project so the backend can run on Vercel alongside your fro
 4. Add these variables (click "Add New" for each):
 
 ```
-DB_HOST = auth-db1274.hstgr.io
+DB_HOST = <YOUR_DB_HOST>
 DB_PORT = 3306
-DB_USER = u334425891_ecourtcase
-DB_PASSWORD = U9OevrCbw!
-DB_NAME = u334425891_ecourtcase
+DB_USER = <YOUR_DB_USER_OR_NAME>
+DB_PASSWORD = <YOUR_DB_PASSWORD>
+DB_NAME = <YOUR_DB_USER_OR_NAME>
 JWT_SECRET = [generate a random 32+ character string]
 API_PORT = 3000
 NODE_ENV = production

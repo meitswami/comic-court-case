@@ -1,7 +1,7 @@
 // Script to add Case Strength Analysis and RTI Tutorial addons to the database
 
 import dotenv from 'dotenv';
-import { query, insert } from '../src/integrations/mysql/client.js';
+import { query, insert } from '../server/lib/mysql.js';
 
 dotenv.config();
 

@@ -2,7 +2,7 @@
 // Handles addon-related endpoints
 
 import express from 'express';
-import { query } from '../../src/integrations/mysql/client.ts';
+import { query } from '../lib/mysql.js';
 
 const router = express.Router();
 

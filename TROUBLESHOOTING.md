@@ -31,10 +31,10 @@
 
 2. **Database connection issue** - Check `.env` file:
    ```env
-   DB_HOST=auth-db1274.hstgr.io
-   DB_USER=u334425891_ecourtcase
-   DB_PASSWORD=U9OevrCbw!
-   DB_NAME=u334425891_ecourtcase
+   DB_HOST=<YOUR_DB_HOST>
+   DB_USER=<YOUR_DB_USER_OR_NAME>
+   DB_PASSWORD=<YOUR_DB_PASSWORD>
+   DB_NAME=<YOUR_DB_USER_OR_NAME>
    ```
 
 3. **User doesn't exist** - If using test credentials, make sure you've run:
