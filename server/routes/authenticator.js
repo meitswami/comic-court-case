@@ -4,7 +4,7 @@
 import express from 'express';
 import speakeasy from 'speakeasy';
 import QRCode from 'qrcode';
-import { query, queryOne, insert, update, generateUUID } from '../../src/integrations/mysql/client.ts';
+import { query, queryOne, insert, update, generateUUID } from '../lib/mysql.js';
 
 const router = express.Router();
 

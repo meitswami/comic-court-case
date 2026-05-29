@@ -3,8 +3,8 @@
 
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { query, queryOne, insert, update, remove } from '../../src/integrations/mysql/client.ts';
-import { isAdmin } from '../../src/services/auth.ts';
+import { query, queryOne, insert, update, remove } from '../lib/mysql.js';
+import { isAdmin } from '../lib/auth.js';
 
 const router = express.Router();
 

@@ -1,91 +1,100 @@
-# Vercel 500 Internal Server Error - Troubleshooting
+# Vercel 500 Error - Troubleshooting
 
-## Current Issue
-Getting **500 Internal Server Error** with "FUNCTION_INVOCATION_FAILED" - The serverless function is running but crashing.
+> **NOTE:** Earlier versions of this file contained real database
+> credentials. Those credentials must be rotated immediately on Hostinger
+> and a new `JWT_SECRET` generated. See
+> [SECURITY: Rotate exposed credentials](./IMPROVEMENTS.md#-rotate-exposed-database-and-jwt-credentials)
+> for the full action list.
 
-## Common Causes
+## Root Cause (fixed in this PR)
 
-### 1. Missing Environment Variables ⚠️ MOST LIKELY
-The database connection is failing because environment variables aren't set in Vercel.
+Every `/api/*` request returned `FUNCTION_INVOCATION_FAILED` because
+`api/index.js` (run by Vercel's `@vercel/node@3` runtime) imported
+`server/routes/*.js`, which in turn imported TypeScript files
+(`src/services/auth.ts`, `src/integrations/mysql/client.ts`).
 
-**Check:**
-1. Go to Vercel Dashboard → Your Project → Settings → Environment Variables
-2. Make sure ALL these variables are set:
-   - `DB_HOST` = `auth-db1274.hstgr.io`
-   - `DB_PORT` = `3306`
-   - `DB_USER` = `u334425891_ecourtcase`
-   - `DB_PASSWORD` = `U9OevrCbw!`
-   - `DB_NAME` = `u334425891_ecourtcase`
-   - `JWT_SECRET` = (your generated secret)
-   - `API_PORT` = `3000`
-   - `NODE_ENV` = `production`
+The Node serverless runtime **cannot resolve `.ts` imports across
+directories**, so the function crashed at module load.
 
-### 2. Check Function Logs
-In Vercel Dashboard:
-1. Go to your project → **Functions** tab
-2. Click on `api/index.js`
-3. Go to **Logs** tab
-4. Look for error messages
+**Fix:** plain-JS copies live in `server/lib/`:
 
-Common errors you might see:
-- `ECONNREFUSED` - Database connection refused
-- `ER_ACCESS_DENIED_ERROR` - Wrong database credentials
-- `Cannot find module` - Import error
-- `JWT_SECRET is not set` - Missing JWT secret
+- `server/lib/mysql.js` (mirrors `src/integrations/mysql/client.ts`)
+- `server/lib/auth.js` (mirrors `src/services/auth.ts`)
 
-### 3. Test Database Connection
-The database connection might be failing. Check:
-- Are the database credentials correct?
-- Does Hostinger allow connections from Vercel's IPs?
-- Is the database server running?
+All server-side code (`server/routes/*.js`, `server/middleware/*.js`,
+`server/index.js`, `scripts/*.js`) now imports from `server/lib/*.js`.
 
-## How to Debug
+After deploying this PR you should see:
 
-### Step 1: Check Vercel Logs
-1. Go to Vercel Dashboard
-2. Click your project
-3. Go to **Functions** → `api/index.js` → **Logs**
-4. Look at the latest error messages
+```bash
+$ curl https://enyayasetu.vercel.app/api/health
+{"status":"ok","timestamp":"..."}
 
-### Step 2: Test Environment Variables
-Add a test endpoint to check if env vars are set:
-
-```javascript
-app.get('/api/test-env', (req, res) => {
-  res.json({
-    dbHost: process.env.DB_HOST || 'NOT SET',
-    dbUser: process.env.DB_USER || 'NOT SET',
-    dbName: process.env.DB_NAME || 'NOT SET',
-    jwtSecret: process.env.JWT_SECRET ? 'SET' : 'NOT SET',
-    nodeEnv: process.env.NODE_ENV || 'NOT SET'
-  });
-});
+$ curl -o /dev/null -w "%{http_code}\n" https://enyayasetu.vercel.app/auth
+200
 ```
 
-Then visit: `https://enyayasetu.vercel.app/api/test-env`
+## Other Things to Verify on Vercel
 
-### Step 3: Check Database Connection
-The database connection might be failing. Common issues:
-- **Hostinger Firewall**: Might block Vercel's IPs
-- **SSL Required**: Hostinger might require SSL connections
-- **Wrong Credentials**: Double-check all DB_* variables
+### 1. All environment variables are set
 
-## Quick Fixes
+Vercel Dashboard → your project → **Settings → Environment Variables**.
+Every key from `.env.example` must be present (using **your own**, freshly
+rotated values):
 
-### Fix 1: Add All Environment Variables
-Make sure ALL variables from `.env.example` are set in Vercel.
+- `DB_HOST`
+- `DB_PORT` (`3306`)
+- `DB_USER`
+- `DB_PASSWORD`
+- `DB_NAME`
+- `JWT_SECRET` (generate with `openssl rand -base64 32`)
+- `JWT_EXPIRES_IN` (`7d`)
+- `API_PORT` (`3000`)
+- `NODE_ENV` (`production`)
 
-### Fix 2: Check Function Logs
-The logs will tell you exactly what's wrong.
+### 2. Hostinger MySQL allows remote connections
 
-### Fix 3: Test with Simple Endpoint
-The `/health` endpoint should work even without database. If that fails, it's an import/module issue.
+Vercel egress IPs are dynamic. In Hostinger's hPanel:
 
-## Next Steps
+1. Open **Databases → Remote MySQL**.
+2. Add the wildcard host `%` (or a list of Vercel IP ranges) for the
+   database user.
+3. Confirm SSL is enabled — `server/lib/mysql.js` already passes
+   `ssl: { rejectUnauthorized: false }` for `*.hstgr.io` hosts.
 
-1. **Check Vercel Function Logs** - This will show the exact error
-2. **Verify Environment Variables** - Make sure all are set
-3. **Test `/api` endpoint** - See if it returns anything
-4. **Share the error from logs** - Then we can fix the specific issue
+### 3. Check function logs
 
-**Most likely:** Missing `JWT_SECRET` or database connection failing due to missing/env vars.
+Vercel Dashboard → **Functions** tab → `api/index.js` → **Logs**.
+
+Common errors after this PR is merged:
+
+| Log line                                              | Meaning                              |
+| ----------------------------------------------------- | ------------------------------------ |
+| `ECONNREFUSED` / `ENOTFOUND`                          | DB host unreachable / wrong          |
+| `ER_ACCESS_DENIED_ERROR`                              | DB user / password wrong             |
+| `ER_DBACCESS_DENIED_ERROR`                            | DB user lacks privileges on the DB   |
+| `JWT_SECRET is not set`                               | Missing env var                      |
+| `Cannot find module '../../src/...'`                  | Should not happen after this PR      |
+
+### 4. Quick endpoint tests
+
+```bash
+# Health
+curl https://enyayasetu.vercel.app/api/health
+
+# Env presence (booleans only - safe)
+curl https://enyayasetu.vercel.app/api/test-env
+
+# Sign up
+curl -X POST https://enyayasetu.vercel.app/api/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","password":"StrongPass!23"}'
+
+# Sign in
+curl -X POST https://enyayasetu.vercel.app/api/auth/signin \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","password":"StrongPass!23"}'
+```
+
+If `/api/test-env` reports any variable as `NOT SET`, fix that in Vercel
+**before** debugging anything else.

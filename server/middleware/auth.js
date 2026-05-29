@@ -2,7 +2,7 @@
 // Validates JWT tokens for protected routes
 
 import jwt from 'jsonwebtoken';
-import { queryOne } from '../../src/integrations/mysql/client.ts';
+import { queryOne } from '../lib/mysql.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 

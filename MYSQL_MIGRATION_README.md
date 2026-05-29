@@ -56,26 +56,26 @@ cp .env.example .env
 
 2. Update `.env` with your Hostinger database credentials:
 ```env
-DB_HOST=auth-db1274.hstgr.io
-DB_USER=u334425891_ecourtcase
-DB_PASSWORD=U9OevrCbw!
-DB_NAME=u334425891_ecourtcase
+DB_HOST=<YOUR_DB_HOST>
+DB_USER=<YOUR_DB_USER_OR_NAME>
+DB_PASSWORD=<YOUR_DB_PASSWORD>
+DB_NAME=<YOUR_DB_USER_OR_NAME>
 JWT_SECRET=your-secret-key-change-in-production-min-32-characters
 ```
 
 ### Step 3: Run MySQL Migrations
 
 **Option A: Using phpMyAdmin (Recommended for Hostinger)**
-1. Log in to phpMyAdmin: https://auth-db1274.hstgr.io/
-2. Select database: `u334425891_ecourtcase`
+1. Log in to phpMyAdmin: https://<YOUR_DB_HOST>/
+2. Select database: `<YOUR_DB_USER_OR_NAME>`
 3. Go to "SQL" tab
 4. Copy and paste each migration file in order (001, 002, 003, etc.)
 5. Execute each migration
 
 **Option B: Using MySQL Command Line**
 ```bash
-mysql -h auth-db1274.hstgr.io -u u334425891_ecourtcase -p u334425891_ecourtcase < mysql/migrations/001_initial_schema.sql
-mysql -h auth-db1274.hstgr.io -u u334425891_ecourtcase -p u334425891_ecourtcase < mysql/migrations/002_case_intake_and_reports.sql
+mysql -h <YOUR_DB_HOST> -u <YOUR_DB_USER_OR_NAME> -p <YOUR_DB_USER_OR_NAME> < mysql/migrations/001_initial_schema.sql
+mysql -h <YOUR_DB_HOST> -u <YOUR_DB_USER_OR_NAME> -p <YOUR_DB_USER_OR_NAME> < mysql/migrations/002_case_intake_and_reports.sql
 # ... continue for all 9 files
 ```
 

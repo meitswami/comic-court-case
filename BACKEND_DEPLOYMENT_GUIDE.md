@@ -53,11 +53,11 @@ You have several options. Here are the easiest ones:
 4. **Add Environment Variables:**
    Click "Variables" tab and add:
    ```
-   DB_HOST=auth-db1274.hstgr.io
+   DB_HOST=<YOUR_DB_HOST>
    DB_PORT=3306
-   DB_USER=u334425891_ecourtcase
-   DB_PASSWORD=U9OevrCbw!
-   DB_NAME=u334425891_ecourtcase
+   DB_USER=<YOUR_DB_USER_OR_NAME>
+   DB_PASSWORD=<YOUR_DB_PASSWORD>
+   DB_NAME=<YOUR_DB_USER_OR_NAME>
    JWT_SECRET=your-secret-key-change-this-to-random-32-characters
    API_PORT=3000
    NODE_ENV=production

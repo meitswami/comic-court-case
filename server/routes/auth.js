@@ -2,7 +2,7 @@
 // Handles authentication endpoints
 
 import express from 'express';
-import { signUp, signIn, isAdmin } from '../../src/services/auth.ts';
+import { signUp, signIn, isAdmin } from '../lib/auth.js';
 import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();

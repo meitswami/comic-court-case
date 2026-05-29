@@ -93,7 +93,7 @@ app.use((err, req, res, next) => {
 // Test database connection on startup
 async function testDatabaseConnection() {
   try {
-    const { query } = await import('../src/integrations/mysql/client.js');
+    const { query } = await import('./lib/mysql.js');
     const result = await query('SELECT 1 as test');
     console.log('✅ Database connection verified');
   } catch (error) {

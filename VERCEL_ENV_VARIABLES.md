@@ -5,11 +5,11 @@ Copy and paste these environment variables into Vercel:
 ## Database Configuration (Hostinger MySQL)
 
 ```
-DB_HOST=auth-db1274.hstgr.io
+DB_HOST=<YOUR_DB_HOST>
 DB_PORT=3306
-DB_USER=u334425891_ecourtcase
-DB_PASSWORD=U9OevrCbw!
-DB_NAME=u334425891_ecourtcase
+DB_USER=<YOUR_DB_USER_OR_NAME>
+DB_PASSWORD=<YOUR_DB_PASSWORD>
+DB_NAME=<YOUR_DB_USER_OR_NAME>
 ```
 
 ## JWT Secret (Security)
@@ -43,7 +43,7 @@ NODE_ENV=production
 4. For each variable above:
    - Click **"Add New"**
    - Paste the **name** (e.g., `DB_HOST`)
-   - Paste the **value** (e.g., `auth-db1274.hstgr.io`)
+   - Paste the **value** (e.g., `<YOUR_DB_HOST>`)
    - Select **Production**, **Preview**, and **Development**
    - Click **"Save"**
 
@@ -54,7 +54,7 @@ NODE_ENV=production
 ## ⚠️ Important Notes
 
 - **JWT_SECRET**: Generate a unique random string - don't use the example!
-- **DB_PASSWORD**: Make sure it's correct (already set to: `U9OevrCbw!`)
+- **DB_PASSWORD**: Make sure it's correct (already set to: `<YOUR_DB_PASSWORD>`)
 - Select all environments (Production, Preview, Development) for each variable
 - After adding all variables, redeploy your project
 
@@ -66,11 +66,11 @@ Here's the format you'll use in Vercel (replace JWT_SECRET with your generated v
 
 | Variable Name | Value |
 |--------------|-------|
-| DB_HOST | auth-db1274.hstgr.io |
+| DB_HOST | <YOUR_DB_HOST> |
 | DB_PORT | 3306 |
-| DB_USER | u334425891_ecourtcase |
-| DB_PASSWORD | U9OevrCbw! |
-| DB_NAME | u334425891_ecourtcase |
+| DB_USER | <YOUR_DB_USER_OR_NAME> |
+| DB_PASSWORD | <YOUR_DB_PASSWORD> |
+| DB_NAME | <YOUR_DB_USER_OR_NAME> |
 | JWT_SECRET | **[GENERATE YOUR OWN - 32+ characters]** |
 | API_PORT | 3000 |
 | NODE_ENV | production |

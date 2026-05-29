@@ -3,7 +3,7 @@
 
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { query, queryOne, insert, update, generateUUID } from '../../src/integrations/mysql/client.ts';
+import { query, queryOne, insert, update, generateUUID } from '../lib/mysql.js';
 
 const router = express.Router();
 
