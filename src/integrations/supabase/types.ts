@@ -970,6 +970,14 @@ export type Database = {
         Returns: boolean
       }
       is_admin: { Args: never; Returns: boolean }
+      is_session_participant: {
+        Args: { _session_id: string }
+        Returns: boolean
+      }
+      owns_court_participant: {
+        Args: { _participant_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
       app_role: "admin" | "user"
