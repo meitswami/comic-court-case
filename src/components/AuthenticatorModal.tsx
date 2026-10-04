@@ -13,167 +13,118 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp
 import { Shield, CheckCircle2, Copy, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { getApiUrl } from '@/utils/apiUrl';
+import type { Session } from '@/hooks/useAuth';
 
+// Shown only when an ADMIN signs in. /api/auth/signin answers an admin's
+// correct password with a short-lived challenge token instead of a session;
+// this dialog exchanges that challenge plus an authenticator code for the
+// session. Normal users never see it.
 interface AuthenticatorModalProps {
   open: boolean;
-  onVerified: () => void;
+  /** Challenge token returned by /api/auth/signin for an admin account. */
+  challengeToken: string;
+  /** True when no authenticator has been configured yet (first admin sign-in). */
+  setupRequired: boolean;
+  onVerified: (session: Session) => void;
+  onCancel: () => void;
 }
 
-type ModalMode = 'checking' | 'setup' | 'setup-verify' | 'login' | 'success';
+type ModalMode = 'setup' | 'setup-verify' | 'backup-codes' | 'login' | 'success';
 
 export const AuthenticatorModal: React.FC<AuthenticatorModalProps> = ({
   open,
+  challengeToken,
+  setupRequired,
   onVerified,
+  onCancel,
 }) => {
-  const [mode, setMode] = useState<ModalMode>('checking');
+  const [mode, setMode] = useState<ModalMode>('login');
   const [otp, setOtp] = useState('');
-  const [fullName, setFullName] = useState('');
+  const [backupCode, setBackupCode] = useState('');
+  const [useBackupCode, setUseBackupCode] = useState(false);
   const [qrCode, setQrCode] = useState<string>('');
   const [manualEntryKey, setManualEntryKey] = useState('');
   const [backupCodes, setBackupCodes] = useState<string[]>([]);
+  const [pendingSession, setPendingSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(false);
-  const [ownerName, setOwnerName] = useState('');
   const { toast } = useToast();
 
+  // Reset every time the dialog opens
   useEffect(() => {
     if (open) {
-      // Reset state when modal opens
       setOtp('');
-      setFullName('');
-      checkAuthStatus();
+      setBackupCode('');
+      setUseBackupCode(false);
+      setQrCode('');
+      setManualEntryKey('');
+      setBackupCodes([]);
+      setPendingSession(null);
+      setLoading(false);
+      setMode(setupRequired ? 'setup' : 'login');
     }
-  }, [open]);
+  }, [open, setupRequired]);
 
-  // Auto-verify when 6 digits are entered in login mode
+  // Auto-verify when 6 digits are entered
   useEffect(() => {
-    if (mode === 'login' && otp.length === 6 && fullName.trim() && !loading) {
-      // Small delay to ensure all digits are registered
-      const timeoutId = setTimeout(() => {
-        if (otp.length === 6 && fullName.trim()) {
-          verifyLogin();
-        }
-      }, 300);
-      return () => clearTimeout(timeoutId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [otp, mode, fullName, loading]);
+    if (loading || otp.length !== 6) return;
+    if (mode !== 'login' && mode !== 'setup-verify') return;
 
-  // Auto-verify when 6 digits are entered in setup-verify mode
-  useEffect(() => {
-    if (mode === 'setup-verify' && otp.length === 6 && !loading) {
-      // Small delay to ensure all digits are registered
-      const timeoutId = setTimeout(() => {
-        if (otp.length === 6) {
-          verifySetup();
-        }
-      }, 300);
-      return () => clearTimeout(timeoutId);
-    }
+    // Small delay to ensure all digits are registered
+    const timeoutId = setTimeout(() => {
+      if (mode === 'login') {
+        verifyLogin(otp);
+      } else {
+        verifySetup();
+      }
+    }, 300);
+    return () => clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [otp, mode, loading]);
 
-  const checkAuthStatus = async () => {
-    try {
-      setMode('checking');
-      
-      const API_URL = getApiUrl();
-      
-      // Don't proceed if API_URL is localhost in production (likely misconfigured)
-      if (API_URL.includes('localhost') && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-        console.warn('[Authenticator] API URL points to localhost in production. Skipping 2FA check.');
-        // Don't show modal if API is not reachable
-        return;
-      }
-      
-      const response = await fetch(`${API_URL}/api/authenticator/status`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      
-      if (data.isSetup) {
-        // 2FA already set up - go to verification
-        setOwnerName(data.ownerName || '');
-        setMode('login');
-      } else {
-        // Need to set up 2FA
-        setMode('setup');
-      }
-    } catch (error: any) {
-      console.error('Error checking auth status:', error);
-      
-      // If it's a network error or blocked request, don't show the modal
-      // This prevents showing 2FA modal when API is not available
-      if (
-        error.message?.includes('Failed to fetch') ||
-        error.message?.includes('ERR_BLOCKED') ||
-        error.name === 'TypeError' ||
-        !error.response // Network error, not API error
-      ) {
-        console.warn('[Authenticator] API unreachable. Skipping 2FA requirement.');
-        // Don't show modal - API is likely not configured or not reachable
-        // This allows the app to work without 2FA if backend is not available
-        return;
-      }
-      
-      toast({
-        title: 'Error',
-        description: 'Failed to check authentication status',
-        variant: 'destructive',
-      });
-      // Only show setup mode if it's a real API error (not network error)
-      setMode('setup');
-    }
+  const post = async (path: string, body: Record<string, unknown>) => {
+    const response = await fetch(`${getApiUrl()}/api/authenticator/${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challengeToken, ...body }),
+    });
+    const data = await response.json().catch(() => ({}));
+    return { response, data };
+  };
+
+  // The challenge is only valid for a few minutes after the password step.
+  const handleExpired = (data: any) => {
+    if (!data?.challengeExpired) return false;
+    toast({
+      title: 'Sign-in Expired',
+      description: 'Please sign in again.',
+      variant: 'destructive',
+    });
+    onCancel();
+    return true;
   };
 
   const generateQRCode = async () => {
-    if (!fullName.trim()) {
-      toast({
-        title: 'Full Name Required',
-        description: 'Please enter your full name',
-        variant: 'destructive',
-      });
-      return;
-    }
-
     try {
       setLoading(true);
-      const API_URL = getApiUrl();
-      const response = await fetch(`${API_URL}/api/authenticator/setup`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ ownerName: fullName.trim() }),
-      });
-
-      const data = await response.json();
+      const { response, data } = await post('setup', {});
 
       if (response.ok) {
         setQrCode(data.qrCode);
         setManualEntryKey(data.manualEntryKey);
         setBackupCodes(data.backupCodes || []);
         setMode('setup-verify');
-        setOwnerName(fullName.trim());
-      } else {
-        if (data.secretExists) {
-          // Secret exists but not verified - allow to proceed
-          toast({
-            title: 'Setup Already Started',
-            description: 'Please verify your code to complete setup',
-          });
-          setMode('setup-verify');
-        } else {
-          throw new Error(data.error || 'Failed to generate QR code');
-        }
+        return;
       }
+
+      if (handleExpired(data)) return;
+
+      if (data.secretExists) {
+        // Someone finished setup in the meantime - just ask for the code
+        setMode('login');
+        return;
+      }
+
+      throw new Error(data.error || 'Failed to generate QR code');
     } catch (error: any) {
       console.error('Error generating QR code:', error);
       toast({
@@ -187,7 +138,7 @@ export const AuthenticatorModal: React.FC<AuthenticatorModalProps> = ({
   };
 
   const verifySetup = async () => {
-    if (!otp || otp.length !== 6) {
+    if (otp.length !== 6) {
       toast({
         title: 'Invalid Code',
         description: 'Please enter a 6-digit code',
@@ -198,50 +149,39 @@ export const AuthenticatorModal: React.FC<AuthenticatorModalProps> = ({
 
     try {
       setLoading(true);
-      const API_URL = getApiUrl();
-      const response = await fetch(`${API_URL}/api/authenticator/verify-setup`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ token: otp }),
-      });
+      const { response, data } = await post('verify-setup', { code: otp });
 
-      const data = await response.json();
-
-      if (response.ok) {
-        setMode('success');
+      if (response.ok && data.session) {
         toast({
           title: 'Success',
           description: 'Authenticator successfully set up!',
         });
-        
-        // Show backup codes
+
         if (backupCodes.length > 0) {
-          setTimeout(() => {
-            toast({
-              title: 'Backup Codes',
-              description: `Save these codes: ${backupCodes.join(', ')}`,
-              duration: 10000,
-            });
-          }, 1000);
+          // Let the admin save the backup codes before continuing
+          setPendingSession(data.session);
+          setMode('backup-codes');
+        } else {
+          setMode('success');
+          setTimeout(() => onVerified(data.session), 1000);
         }
-        
-        // Allow access after a brief delay
-        setTimeout(() => {
-          onVerified();
-        }, 2000);
-      } else {
-        throw new Error(data.error || 'Wrong passcode');
+        return;
       }
+
+      if (handleExpired(data)) return;
+
+      if (data.secretExists) {
+        setOtp('');
+        setMode('login');
+        return;
+      }
+
+      throw new Error(data.error || 'Wrong passcode');
     } catch (error: any) {
       console.error('Error verifying setup:', error);
-      const errorMessage = error.message || 'Wrong passcode';
       toast({
         title: 'Wrong Passcode',
-        description: errorMessage.includes('passcode') || errorMessage.includes('Invalid') 
-          ? 'Wrong passcode. Please try again.' 
-          : errorMessage,
+        description: error.message || 'Wrong passcode. Please try again.',
         variant: 'destructive',
       });
       setOtp('');
@@ -250,20 +190,11 @@ export const AuthenticatorModal: React.FC<AuthenticatorModalProps> = ({
     }
   };
 
-  const verifyLogin = async () => {
-    if (!fullName.trim()) {
-      toast({
-        title: 'Full Name Required',
-        description: 'Please enter your full name',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (!otp || otp.length !== 6) {
+  const verifyLogin = async (code: string) => {
+    if (!code) {
       toast({
         title: 'Invalid Code',
-        description: 'Please enter a 6-digit code',
+        description: 'Please enter your code',
         variant: 'destructive',
       });
       return;
@@ -271,45 +202,36 @@ export const AuthenticatorModal: React.FC<AuthenticatorModalProps> = ({
 
     try {
       setLoading(true);
-      const API_URL = getApiUrl();
-      const response = await fetch(`${API_URL}/api/authenticator/verify`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          token: otp,
-          fullName: fullName.trim(),
-        }),
-      });
+      const { response, data } = await post('verify', { code });
 
-      const data = await response.json();
-
-      if (response.ok) {
+      if (response.ok && data.session) {
         setMode('success');
         toast({
           title: 'Success',
           description: 'Authentication successful!',
         });
-        
-        // Allow access after a brief delay
-        setTimeout(() => {
-          onVerified();
-        }, 1000);
-      } else {
-        throw new Error(data.error || 'Wrong passcode');
+        setTimeout(() => onVerified(data.session), 1000);
+        return;
       }
+
+      if (handleExpired(data)) return;
+
+      if (data.setupRequired) {
+        setOtp('');
+        setMode('setup');
+        return;
+      }
+
+      throw new Error(data.error || 'Wrong passcode');
     } catch (error: any) {
       console.error('Error verifying login:', error);
-      const errorMessage = error.message || 'Wrong passcode';
       toast({
         title: 'Wrong Passcode',
-        description: errorMessage.includes('passcode') || errorMessage.includes('Invalid') 
-          ? 'Wrong passcode. Please try again.' 
-          : errorMessage,
+        description: error.message || 'Wrong passcode. Please try again.',
         variant: 'destructive',
       });
       setOtp('');
+      setBackupCode('');
     } finally {
       setLoading(false);
     }
@@ -323,57 +245,55 @@ export const AuthenticatorModal: React.FC<AuthenticatorModalProps> = ({
     });
   };
 
-  const renderContent = () => {
-    if (mode === 'checking') {
-      return (
-        <div className="flex flex-col items-center justify-center py-8">
-          <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
-          <p className="text-muted-foreground">Checking authentication status...</p>
-        </div>
-      );
-    }
+  const renderOtpInput = () => (
+    <div className="bg-muted/30 rounded-lg p-4 mb-2">
+      <p className="text-sm text-muted-foreground mb-3 text-center">
+        Open Microsoft Authenticator app on your phone and enter the 6-digit code shown there
+      </p>
+      <InputOTP
+        maxLength={6}
+        value={otp}
+        onChange={setOtp}
+        containerClassName="justify-center"
+      >
+        <InputOTPGroup>
+          {[...Array(6)].map((_, i) => (
+            <InputOTPSlot key={i} index={i} />
+          ))}
+        </InputOTPGroup>
+      </InputOTP>
+      {otp.length > 0 && otp.length < 6 && (
+        <p className="text-xs text-muted-foreground mt-2 text-center">
+          Enter {6 - otp.length} more digit{6 - otp.length !== 1 ? 's' : ''}
+        </p>
+      )}
+    </div>
+  );
 
+  const renderContent = () => {
     if (mode === 'setup') {
       return (
         <div className="space-y-6">
           <div className="text-center">
             <h3 className="text-lg font-semibold mb-2">Initial Setup Required</h3>
             <p className="text-sm text-muted-foreground">
-              Set up Microsoft Authenticator to secure access to eNyayaSetu
+              Set up Microsoft Authenticator to secure admin access to eNyayaSetu
             </p>
           </div>
 
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="owner-name">Your Full Name *</Label>
-              <Input
-                id="owner-name"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder="Enter your full name"
-                className="mt-1"
-                required
-              />
-            </div>
-
-            <Button
-              onClick={generateQRCode}
-              disabled={!fullName.trim() || loading}
-              className="w-full"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <Shield className="mr-2 h-4 w-4" />
-                  Generate QR Code
-                </>
-              )}
-            </Button>
-          </div>
+          <Button onClick={generateQRCode} disabled={loading} className="w-full">
+            {loading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Shield className="mr-2 h-4 w-4" />
+                Generate QR Code
+              </>
+            )}
+          </Button>
         </div>
       );
     }
@@ -388,64 +308,32 @@ export const AuthenticatorModal: React.FC<AuthenticatorModalProps> = ({
             </p>
           </div>
 
-          {qrCode ? (
-            <div className="flex flex-col items-center space-y-4">
-              <div className="border-2 border-border rounded-lg p-4 bg-background">
-                <img src={qrCode} alt="QR Code" className="w-64 h-64" />
-              </div>
+          <div className="flex flex-col items-center space-y-4">
+            <div className="border-2 border-border rounded-lg p-4 bg-background">
+              <img src={qrCode} alt="QR Code" className="w-64 h-64" />
+            </div>
 
-              <div className="w-full">
-                <Label className="mb-2 block">Manual Entry Key</Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={manualEntryKey}
-                    readOnly
-                    className="font-mono text-sm"
-                  />
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => copyToClipboard(manualEntryKey)}
-                  >
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                </div>
+            <div className="w-full">
+              <Label className="mb-2 block">Manual Entry Key</Label>
+              <div className="flex items-center gap-2">
+                <Input value={manualEntryKey} readOnly className="font-mono text-sm" />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => copyToClipboard(manualEntryKey)}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
               </div>
             </div>
-          ) : (
-            <div className="flex items-center justify-center p-4 bg-muted/50 rounded-lg">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground mr-2" />
-              <p className="text-sm text-muted-foreground">Loading QR code...</p>
-            </div>
-          )}
+          </div>
 
           <div className="space-y-4 border-t pt-4">
             <div>
               <Label className="text-base font-semibold mb-3 block">
                 6-Digit Code from Microsoft Authenticator *
               </Label>
-              <div className="bg-muted/30 rounded-lg p-4 mb-2">
-                <p className="text-sm text-muted-foreground mb-3 text-center">
-                  Open Microsoft Authenticator app on your phone and enter the 6-digit code shown there
-                </p>
-                <InputOTP
-                  maxLength={6}
-                  value={otp}
-                  onChange={setOtp}
-                  className="justify-center"
-                >
-                  <InputOTPGroup>
-                    {[...Array(6)].map((_, i) => (
-                      <InputOTPSlot key={i} index={i} />
-                    ))}
-                  </InputOTPGroup>
-                </InputOTP>
-                {otp.length > 0 && otp.length < 6 && (
-                  <p className="text-xs text-muted-foreground mt-2 text-center">
-                    Enter {6 - otp.length} more digit{6 - otp.length !== 1 ? 's' : ''}
-                  </p>
-                )}
-              </div>
+              {renderOtpInput()}
             </div>
 
             <Button
@@ -470,60 +358,81 @@ export const AuthenticatorModal: React.FC<AuthenticatorModalProps> = ({
       );
     }
 
+    if (mode === 'backup-codes') {
+      return (
+        <div className="space-y-6">
+          <div className="text-center">
+            <CheckCircle2 className="h-12 w-12 text-green-500 mx-auto mb-2" />
+            <h3 className="text-lg font-semibold mb-2">Save Your Backup Codes</h3>
+            <p className="text-sm text-muted-foreground">
+              Each code works once if you lose access to your authenticator app.
+              They will not be shown again.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 bg-muted/30 rounded-lg p-4 font-mono text-sm text-center">
+            {backupCodes.map((code) => (
+              <span key={code}>{code}</span>
+            ))}
+          </div>
+
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => copyToClipboard(backupCodes.join('\n'))}
+            >
+              <Copy className="mr-2 h-4 w-4" />
+              Copy
+            </Button>
+            <Button
+              className="flex-1"
+              onClick={() => pendingSession && onVerified(pendingSession)}
+            >
+              I've Saved Them
+            </Button>
+          </div>
+        </div>
+      );
+    }
+
     if (mode === 'login') {
       return (
         <div className="space-y-6">
           <div className="text-center">
             <h3 className="text-lg font-semibold mb-2">Authenticator Code Required</h3>
             <p className="text-sm text-muted-foreground">
-              Please enter the 6-digit code from Microsoft Authenticator to access eNyayaSetu
+              Admin accounts need a code from Microsoft Authenticator to sign in
             </p>
           </div>
 
           <div className="space-y-4">
-            <div>
-              <Label htmlFor="full-name">Full Name *</Label>
-              <Input
-                id="full-name"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder="Enter your full name"
-                className="mt-1"
-                required
-              />
-            </div>
-
-            <div className="border-t pt-4">
-              <Label className="text-base font-semibold mb-3 block">
-                6-Digit Code from Microsoft Authenticator *
-              </Label>
-              <div className="bg-muted/30 rounded-lg p-4 mb-2">
-                <p className="text-sm text-muted-foreground mb-3 text-center">
-                  Open Microsoft Authenticator app on your phone and enter the 6-digit code shown there
-                </p>
-                <InputOTP
-                  maxLength={6}
-                  value={otp}
-                  onChange={setOtp}
-                  className="justify-center"
-                >
-                  <InputOTPGroup>
-                    {[...Array(6)].map((_, i) => (
-                      <InputOTPSlot key={i} index={i} />
-                    ))}
-                  </InputOTPGroup>
-                </InputOTP>
-                {otp.length > 0 && otp.length < 6 && (
-                  <p className="text-xs text-muted-foreground mt-2 text-center">
-                    Enter {6 - otp.length} more digit{6 - otp.length !== 1 ? 's' : ''}
-                  </p>
-                )}
+            {useBackupCode ? (
+              <div>
+                <Label htmlFor="backup-code" className="text-base font-semibold mb-3 block">
+                  Backup Code *
+                </Label>
+                <Input
+                  id="backup-code"
+                  value={backupCode}
+                  onChange={(e) => setBackupCode(e.target.value.trim())}
+                  placeholder="Enter one of your backup codes"
+                  className="font-mono"
+                  autoComplete="off"
+                />
               </div>
-            </div>
+            ) : (
+              <div>
+                <Label className="text-base font-semibold mb-3 block">
+                  6-Digit Code from Microsoft Authenticator *
+                </Label>
+                {renderOtpInput()}
+              </div>
+            )}
 
             <Button
-              onClick={verifyLogin}
-              disabled={!fullName.trim() || otp.length !== 6 || loading}
+              onClick={() => verifyLogin(useBackupCode ? backupCode : otp)}
+              disabled={(useBackupCode ? !backupCode : otp.length !== 6) || loading}
               className="w-full"
             >
               {loading ? (
@@ -538,6 +447,18 @@ export const AuthenticatorModal: React.FC<AuthenticatorModalProps> = ({
                 </>
               )}
             </Button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setUseBackupCode(!useBackupCode);
+                setOtp('');
+                setBackupCode('');
+              }}
+              className="w-full text-center text-sm text-primary hover:underline"
+            >
+              {useBackupCode ? 'Use authenticator app instead' : 'Use a backup code instead'}
+            </button>
           </div>
         </div>
       );
@@ -556,8 +477,17 @@ export const AuthenticatorModal: React.FC<AuthenticatorModalProps> = ({
     return null;
   };
 
+  // Closing the dialog cancels the sign-in, except while the one-time backup
+  // codes are on screen or the verified session is being handed over.
+  const canClose = mode !== 'backup-codes' && mode !== 'success';
+
   return (
-    <Dialog open={open} onOpenChange={() => {}}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen && canClose) onCancel();
+      }}
+    >
       <DialogContent className="sm:max-w-md" onInteractOutside={(e) => e.preventDefault()}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -565,8 +495,8 @@ export const AuthenticatorModal: React.FC<AuthenticatorModalProps> = ({
             Two-Factor Authentication
           </DialogTitle>
           <DialogDescription>
-            {mode === 'setup' || mode === 'setup-verify'
-              ? 'Set up Microsoft Authenticator to secure your access'
+            {mode === 'setup' || mode === 'setup-verify' || mode === 'backup-codes'
+              ? 'Set up Microsoft Authenticator to secure admin access'
               : 'Enter your authenticator code to continue'}
           </DialogDescription>
         </DialogHeader>

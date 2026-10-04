@@ -1,3 +1,4 @@
+import { getApiUrl } from '@/utils/apiUrl';
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -47,7 +48,7 @@ const Pricing = () => {
 
   const fetchAddons = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+      const API_URL = getApiUrl(true);
       const response = await fetch(`${API_URL}/addons?status=active`);
       
       if (!response.ok) {
@@ -105,7 +106,7 @@ const Pricing = () => {
     if (!user?.id) return;
     
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+      const API_URL = getApiUrl(true);
       const session = localStorage.getItem('auth_session');
       const token = session ? JSON.parse(session).access_token : null;
       

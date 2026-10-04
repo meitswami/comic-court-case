@@ -1,3 +1,4 @@
+import { getApiUrl } from '@/utils/apiUrl';
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -30,7 +31,7 @@ export const YourCasesSection: React.FC<YourCasesSectionProps> = ({ userId }) =>
   useEffect(() => {
     const fetchCases = async () => {
       try {
-        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+        const API_URL = getApiUrl(true);
         const token = localStorage.getItem('auth_token');
         
         if (!token) {

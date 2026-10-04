@@ -1,3 +1,4 @@
+import { getApiUrl } from '@/utils/apiUrl';
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -108,7 +109,7 @@ const Dashboard = () => {
   const fetchMyCases = async () => {
     setIsLoading(true);
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+      const API_URL = getApiUrl(true);
       
       // Get access token from auth_session
       let token = null;
@@ -180,7 +181,7 @@ const Dashboard = () => {
       }
 
       // Check if session already exists with payment
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+      const API_URL = getApiUrl(true);
       const sessionsResponse = await fetch(`${API_URL}/court/sessions?case_id=${caseRecord.id}&payment_status=completed`, {
         headers: {
           'Authorization': `Bearer ${token}`,

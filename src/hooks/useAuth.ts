@@ -10,11 +10,24 @@ interface User {
   updated_at: string;
 }
 
-interface Session {
+export interface Session {
   access_token: string;
   token_type: string;
   expires_in: number;
   user: User;
+}
+
+// Returned by signIn for an ADMIN account: the password was correct, but no
+// session exists until an authenticator code is verified (AuthenticatorModal).
+export interface TwoFactorChallenge {
+  challengeToken: string;
+  setupRequired: boolean;
+}
+
+interface SignInResult {
+  data: any;
+  error: Error | null;
+  twoFactor?: TwoFactorChallenge;
 }
 
 export const useAuth = () => {
@@ -100,7 +113,7 @@ export const useAuth = () => {
     }
   };
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = async (email: string, password: string): Promise<SignInResult> => {
     try {
       const API_URL = getApiUrl(true); // Get API base URL with /api path at runtime
       const response = await fetch(`${API_URL}/auth/signin`, {
@@ -135,6 +148,17 @@ export const useAuth = () => {
         setUser(data.session.user);
         localStorage.setItem('auth_session', JSON.stringify(data.session));
         return { data, error: null };
+      } else if (response.ok && data.requires2FA) {
+        // Admin account: authenticator code still needed. No session yet -
+        // the caller shows the authenticator dialog.
+        return {
+          data: null,
+          error: null,
+          twoFactor: {
+            challengeToken: data.challengeToken,
+            setupRequired: data.setupRequired === true,
+          },
+        };
       } else {
         const errorMessage = data?.error || 'Sign in failed';
         return { data: null, error: new Error(errorMessage) };
@@ -168,6 +192,13 @@ export const useAuth = () => {
     }
   };
 
+  // Stores the session an admin receives after passing the authenticator check.
+  const completeTwoFactor = (newSession: Session) => {
+    setSession(newSession);
+    setUser(newSession.user);
+    localStorage.setItem('auth_session', JSON.stringify(newSession));
+  };
+
   return {
     user,
     session,
@@ -175,6 +206,7 @@ export const useAuth = () => {
     signUp,
     signIn,
     signOut,
+    completeTwoFactor,
     isAuthenticated: !!user,
   };
 };

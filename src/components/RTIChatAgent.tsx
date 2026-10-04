@@ -1,3 +1,4 @@
+import { getApiUrl } from '@/utils/apiUrl';
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Dialog,
@@ -15,7 +16,7 @@ import { useBrowserTTS, TTSLanguage } from '@/hooks/useBrowserTTS';
 import { Mic, Send, Volume2, Loader2, X, MessageCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = getApiUrl();
 
 interface RTIChatAgentProps {
   open: boolean;

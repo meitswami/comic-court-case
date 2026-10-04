@@ -2,7 +2,7 @@
 // Handles authentication endpoints
 
 import express from 'express';
-import { signUp, signIn, isAdmin } from '../lib/auth.js';
+import { signUp, signIn, isAdmin, hasAdminAccess } from '../lib/auth.js';
 import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -47,7 +47,12 @@ router.post('/signin', async (req, res) => {
       return res.status(401).json({ error: result.error.message });
     }
     
-    console.log('Signin successful for:', email);
+    if (result.data.requires2FA) {
+      // Admin account: password accepted, authenticator code still required.
+      console.log('Signin password accepted, authenticator code required for:', email);
+    } else {
+      console.log('Signin successful for:', email);
+    }
     res.json(result.data);
   } catch (error) {
     console.error('Signin exception:', error);
@@ -58,8 +63,11 @@ router.post('/signin', async (req, res) => {
 // Check if user is admin
 router.get('/is-admin', authenticate, async (req, res) => {
   try {
-    const adminStatus = await isAdmin(req.userId);
-    res.json({ isAdmin: adminStatus });
+    const hasRole = await isAdmin(req.userId);
+    const access = hasRole && (await hasAdminAccess(req.userId, req.tfaVerified));
+    // requires2FA: the account is an admin but this session never passed the
+    // authenticator check, so the client should send the user back to sign in.
+    res.json({ isAdmin: access, requires2FA: hasRole && !access });
   } catch (error) {
     res.status(500).json({ error: error.message || 'Internal server error' });
   }

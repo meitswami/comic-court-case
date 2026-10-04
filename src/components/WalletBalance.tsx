@@ -1,3 +1,4 @@
+import { getApiUrl } from '@/utils/apiUrl';
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { IndianRupee, Wallet } from 'lucide-react';
@@ -5,7 +6,7 @@ import { WalletTopUp } from './WalletTopUp';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = getApiUrl();
 
 interface WalletBalanceProps {
   className?: string;

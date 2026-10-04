@@ -13,6 +13,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useAuth } from '@/hooks/useAuth';
+import { getApiUrl } from '@/utils/apiUrl';
 import { useToast } from '@/hooks/use-toast';
 import {
   ArrowLeft,
@@ -75,8 +76,6 @@ interface CaseRecord {
 
 type AdminTab = 'cases' | 'usage' | 'logs' | 'hearing-logs' | 'ai' | 'verifications' | 'settings' | 'users' | 'payments' | 'transactions' | 'wallets' | 'promocodes' | 'addons' | 'gateways' | 'invoices';
 
-const SUPERADMIN_EMAIL = 'superadmin@enyayasetu.test';
-
 const Admin = () => {
   const [activeTab, setActiveTab] = useState<AdminTab>('cases');
   const [cases, setCases] = useState<CaseRecord[]>([]);
@@ -88,7 +87,7 @@ const Admin = () => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [checkingAdmin, setCheckingAdmin] = useState(true);
 
-  const { user, isAuthenticated, loading } = useAuth();
+  const { user, session, isAuthenticated, loading, signOut } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -101,15 +100,15 @@ const Admin = () => {
       }
       
       try {
-        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-        const token = localStorage.getItem('auth_token');
+        const token = session?.access_token;
         
         if (!token) {
           setCheckingAdmin(false);
           return;
         }
         
-        const response = await fetch(`${API_URL}/auth/is-admin`, {
+        // The server decides admin access: admin role + authenticator check.
+        const response = await fetch(`${getApiUrl(true)}/auth/is-admin`, {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
@@ -118,17 +117,21 @@ const Admin = () => {
         
         if (response.ok) {
           const data = await response.json();
+          if (data.requires2FA) {
+            // Admin account signed in before the authenticator check existed:
+            // sign in again so the code is asked.
+            await signOut();
+            toast({
+              title: 'Authenticator Required',
+              description: 'Please sign in again and enter your authenticator code.',
+            });
+            navigate('/auth');
+            return;
+          }
           setIsAdmin(data.isAdmin === true);
-        } else if (user.email === SUPERADMIN_EMAIL || user.email === 'admin@test.com') {
-          // Auto-assign admin role if superadmin email
-          setIsAdmin(true);
         }
       } catch (err) {
         console.error('Error checking admin status:', err);
-        // Fallback: check email
-        if (user.email === SUPERADMIN_EMAIL || user.email === 'admin@test.com') {
-          setIsAdmin(true);
-        }
       } finally {
         setCheckingAdmin(false);
       }
@@ -181,8 +184,8 @@ const Admin = () => {
   const fetchCases = async () => {
     setIsLoading(true);
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-      const token = localStorage.getItem('auth_token');
+      const API_URL = getApiUrl(true);
+      const token = session?.access_token;
       
       if (!token) {
         throw new Error('No authentication token');

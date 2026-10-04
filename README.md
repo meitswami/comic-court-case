@@ -6,7 +6,7 @@
 
 **AI-Powered Virtual Courtroom Platform for Accessible Justice**
 
-🌐 **Live:** [https://enyayasetu.vercel.app/](https://enyayasetu.vercel.app/)
+🌐 **Live:** [https://enyayasetu.meitcybersolutions.com/](https://enyayasetu.meitcybersolutions.com/)
 
 [![Built with React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react&logoColor=white)](https://reactjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -14,7 +14,6 @@
 [![Express](https://img.shields.io/badge/Express-4.21-000000?logo=express&logoColor=white)](https://expressjs.com/)
 [![MySQL](https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
 [![Tailwind](https://img.shields.io/badge/Tailwind-3.4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
-[![Deployed on Vercel](https://img.shields.io/badge/Vercel-deployed-000000?logo=vercel&logoColor=white)](https://enyayasetu.vercel.app/)
 
 </div>
 
@@ -64,7 +63,7 @@ The platform serves:
 
 | Environment | URL                                    |
 | ----------- | -------------------------------------- |
-| Production  | https://enyayasetu.vercel.app/         |
+| Production  | https://enyayasetu.meitcybersolutions.com/         |
 
 > Try the **Example Cases** button on the landing page to walk through a
 > complete hearing without filing your own case.
@@ -118,14 +117,14 @@ The platform serves:
 | UI           | shadcn/ui (Radix), Tailwind CSS, lucide-react, sonner       |
 | State        | TanStack Query, React Context                               |
 | Auth         | Custom JWT (bcryptjs + jsonwebtoken), 2FA via `speakeasy`   |
-| Backend      | Node.js + Express 4, deployed as a Vercel Serverless Function (`api/index.js`) |
+| Backend      | Node.js + Express 4 (`server/index.js`), a long-running Node process |
 | Database     | MySQL 8 (mysql2/promise), Hostinger-friendly with SSL       |
 | AI / OCR     | Gemini 2.5 Flash + GPT-4 (via AI gateway)                   |
 | Voice        | ElevenLabs STT + TTS (`@elevenlabs/react`)                  |
 | Face Detect  | face-api.js (TensorFlow.js)                                 |
 | PDF / QR     | jsPDF, qrcode                                               |
 | Storage      | Supabase Storage (evidence, recordings, knowledge base)     |
-| Hosting      | Vercel (frontend + API), Hostinger (MySQL)                  |
+| Hosting      | Own VPS: nginx (static frontend + reverse proxy) + Express  |
 
 ## 🏗️ System Architecture
 
@@ -142,11 +141,11 @@ The platform serves:
 │   • RTIChatAgent, RTITutorial                                    │
 │   • Wallet, Checkout, AddonPurchase, Authenticator (2FA)         │
 └──────────────────────────────┬───────────────────────────────────┘
-                               │ fetch (same-origin via Vercel)
+                               │ fetch (same origin, /api proxied by nginx)
                                ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│        Vercel Serverless Function — api/index.js                 │
-│        (Express 4, runtime @vercel/node@3)                       │
+│        Express API — server/index.js                             │
+│        (Express 4 on Node.js, behind nginx on the VPS)           │
 │                                                                  │
 │   /api/auth          /api/cases         /api/court               │
 │   /api/payments      /api/invoices      /api/evidence            │
@@ -194,9 +193,9 @@ The platform serves:
 | `*`                      | NotFound page                              | No           |
 
 > 💡 Direct hits to deep routes (e.g. `/dashboard`, `/auth?token=…`) are
-> rewritten to `/index.html` by `vercel.json` so React Router can take
-> over. Without that rewrite, password-reset and email-confirmation
-> links land on Vercel's 404 page.
+> served `/index.html` by nginx (`try_files`) so React Router can take
+> over. Without that fallback, password-reset and email-confirmation
+> links land on nginx's 404 page.
 
 ## 📌 Use Cases
 
@@ -226,12 +225,9 @@ The platform serves:
 
 ```
 eNyayaSetu/
-├── 📂 api/                       # Vercel serverless entry
-│   └── index.js                  # Wraps the Express app for @vercel/node
-│
 ├── 📂 server/                    # Express backend
 │   ├── index.js                  # Long-lived server for `npm run server`
-│   ├── lib/                      # Plain-JS modules used by serverless
+│   ├── lib/                      # Plain-JS modules used by the API
 │   │   ├── auth.js               #   custom JWT auth service
 │   │   └── mysql.js              #   mysql2 connection pool + helpers
 │   ├── middleware/
@@ -267,7 +263,7 @@ eNyayaSetu/
 │   │   └── supabase/             # Storage client + types
 │   ├── services/
 │   │   └── auth.ts               # legacy server-side TS (kept for
-│   │                             # type hints; serverless uses
+│   │                             # type hints; the API uses
 │   │                             # server/lib/auth.js)
 │   ├── utils/                    # apiUrl, generateCasePDF
 │   ├── App.tsx
@@ -283,14 +279,15 @@ eNyayaSetu/
 ├── vite.config.ts
 ├── tailwind.config.ts
 ├── tsconfig.{,app,node}.json
-├── vercel.json                   # SPA rewrites + function runtime
+├── DEPLOYMENT.md                 # VPS deployment guide (nginx + Express)
 ├── .env.example
 └── .gitignore
 ```
 
 ## 🔌 API Endpoints
 
-All endpoints are served from the same Vercel deployment under `/api/*`.
+All endpoints are served by the Express API under `/api/*`, on the same
+origin as the frontend.
 
 | Group         | Method  | Path                        | Description                       |
 | ------------- | :-----: | --------------------------- | --------------------------------- |
@@ -384,23 +381,24 @@ See [`.env.example`](./.env.example) for the full list. Required:
 | `JWT_EXPIRES_IN`   | Token lifetime (default `7d`)                        |
 | `API_PORT`         | Local Express port (default `3000`)                  |
 | `NODE_ENV`         | `development` or `production`                        |
-| `VITE_API_URL`     | Override frontend → backend URL (blank on Vercel)    |
+| `VITE_API_URL`     | Override frontend → backend URL (blank on same origin) |
 
 ## 🚢 Deployment
 
-The live site is deployed on **Vercel** with the following config:
+The live site runs on our own VPS at
+https://enyayasetu.meitcybersolutions.com/:
 
-- `vercel.json` runs `api/index.js` on `@vercel/node@3` and rewrites
-  every non-`/api` path to `index.html` so React Router handles deep
-  links.
-- Environment variables are configured in **Vercel → Settings → Environment
-  Variables** (mirror everything in `.env.example`).
-- The MySQL host must allow remote connections (Hostinger:
+- **nginx** terminates HTTPS, serves the built frontend from `dist/` and
+  falls back to `index.html` so React Router handles deep links.
+- **Express** (`server/index.js`) runs as a long-running Node process;
+  nginx proxies `/api/*` and `/health` to it.
+- Environment variables live in a `.env` file next to the code on the
+  server (mirror everything in `.env.example`).
+- The MySQL host must allow connections from the VPS (Hostinger:
   *Databases → Remote MySQL*).
 
-If `/api/*` returns 500 or `/auth` shows a 404, follow
-[VERCEL_500_ERROR_FIX.md](./VERCEL_500_ERROR_FIX.md) and
-[IMPROVEMENTS.md](./IMPROVEMENTS.md).
+Step-by-step instructions are in [`DEPLOYMENT.md`](./DEPLOYMENT.md). Known
+issues are tracked in [IMPROVEMENTS.md](./IMPROVEMENTS.md).
 
 ## 🗺️ Roadmap
 
@@ -456,6 +454,6 @@ inquiries.
 
 *eNyayaSetu — Bridging the Gap to Justice*
 
-🌐 [enyayasetu.vercel.app](https://enyayasetu.vercel.app/)
+🌐 [enyayasetu.meitcybersolutions.com](https://enyayasetu.meitcybersolutions.com/)
 
 </div>

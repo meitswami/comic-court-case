@@ -25,6 +25,11 @@ export async function authenticate(req, res, next) {
         return res.status(401).json({ error: 'Invalid token: no user ID' });
       }
 
+      // A 2FA challenge token is not a session and cannot be used as one.
+      if (decoded.purpose) {
+        return res.status(401).json({ error: 'Invalid token' });
+      }
+
       // Get user from database
       const user = await queryOne(
         'SELECT id, email, email_verified FROM users WHERE id = ?',
@@ -39,6 +44,8 @@ export async function authenticate(req, res, next) {
       // Attach user to request
       req.user = user;
       req.userId = userId;
+      // True only for an admin session issued after the authenticator check.
+      req.tfaVerified = decoded.tfa === true;
       next();
     } catch (error) {
       console.error('[Auth] Token verification failed:', error.message);
@@ -65,6 +72,20 @@ export async function requireAdmin(req, res, next) {
 
     if (!role) {
       return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    // Once the authenticator is configured, admin routes need a session that
+    // passed the authenticator check at sign-in.
+    if (!req.tfaVerified) {
+      const enabled = await queryOne(
+        'SELECT id FROM master_authenticator_secret WHERE is_enabled = TRUE LIMIT 1'
+      );
+      if (enabled) {
+        return res.status(403).json({
+          error: 'Authenticator verification required',
+          requires2FA: true,
+        });
+      }
     }
 
     next();

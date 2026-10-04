@@ -2,7 +2,7 @@
 
 This document tracks issues identified by:
 - Static analysis of the code at this commit, and
-- Probing the live deployment at https://enyayasetu.vercel.app/.
+- Probing the live deployment at https://enyayasetu.meitcybersolutions.com/.
 
 Legend: 🔴 Critical · 🟠 High · 🟡 Medium · 🟢 Low / Polish
 
@@ -31,66 +31,48 @@ public repo before the merge has them. **Treat them as compromised.**
    openssl rand -base64 32
    ```
 
-3. Update Vercel **Settings → Environment Variables** with the new
-   values for **all** environments (Production, Preview, Development).
-4. Redeploy. All existing user sessions will be invalidated by the new
+3. Update the `.env` file on the VPS with the new values.
+4. Restart the API process. All existing user sessions will be invalidated by the new
    JWT secret — communicate this to active users if needed.
 5. (Optional but recommended) Remove the old credentials from git
    history with `git filter-repo` or BFG Repo-Cleaner.
 
-### 🔴 `/api/*` returned `FUNCTION_INVOCATION_FAILED` (login & register broken)
+### 🔴 `/api/*` returned 500 (login & register broken) — resolved
 
-**Symptom (before this PR):**
+**Symptom (on the earlier serverless hosting):** every backend endpoint —
+including `/api/auth/signup` and `/api/auth/signin` — returned 500.
+**Login and registration were completely non-functional in production.**
 
-```bash
-$ curl https://enyayasetu.vercel.app/api/health
-A server error has occurred
-FUNCTION_INVOCATION_FAILED
-```
+**Root cause:** the server entry imported `server/routes/*.js`, which in
+turn imported `.ts` files in `src/`. The runtime did not transpile `.ts`
+files imported from a `.js` entry, so the API crashed at module load.
 
-Every backend endpoint — including `/api/auth/signup` and
-`/api/auth/signin` — returned 500. **Login and registration were
-completely non-functional in production.**
-
-**Root cause:** `api/index.js` (Vercel serverless) imported
-`server/routes/*.js`, which in turn imported `.ts` files in `src/`.
-Vercel's `@vercel/node@3` runtime doesn't transpile `.ts` files
-imported across directories from a `.js` entry, so the function crashed
-at module load.
-
-**Fix shipped in this PR:** plain-JS copies live under `server/lib/`:
+**Fix:** plain-JS copies live under `server/lib/`:
 
 - `server/lib/mysql.js` ← mirrors `src/integrations/mysql/client.ts`
 - `server/lib/auth.js` ← mirrors `src/services/auth.ts`
 
 All `server/routes/*.js`, `server/middleware/*.js`, `server/index.js`
-and `scripts/*.js` now import from `server/lib/*.js`.
+and `scripts/*.js` now import from `server/lib/*.js`. The API now runs
+as an ordinary Node process (`server/index.js`) on our own VPS.
 
 **Verify after deploy:**
 
 ```bash
-curl https://enyayasetu.vercel.app/api/health
+curl https://enyayasetu.meitcybersolutions.com/api/health
 # expected: {"status":"ok",...}
 
-curl -X POST https://enyayasetu.vercel.app/api/auth/signup \
+curl -X POST https://enyayasetu.meitcybersolutions.com/api/auth/signup \
   -H "Content-Type: application/json" \
   -d '{"email":"qa@test.com","password":"StrongPass!23"}'
 # expected: { "user": {...}, "session": {...} }
 ```
 
-### 🔴 SPA routing 404
+### 🔴 SPA routing 404 — resolved
 
-**Symptom (before this PR):**
-
-```bash
-$ curl -o /dev/null -w "%{http_code}\n" https://enyayasetu.vercel.app/auth
-404
-$ curl -o /dev/null -w "%{http_code}\n" https://enyayasetu.vercel.app/dashboard
-404
-```
-
-Every deep route returned Vercel's `NOT_FOUND` page because the SPA
-rewrite was missing. This silently broke:
+**Symptom (on the earlier hosting):** every deep route such as `/auth` or
+`/dashboard` returned a 404 page because nothing served `index.html` for
+client-side routes. This silently broke:
 
 - Bookmarking any page other than `/`.
 - Refreshing during a hearing or while filling a form.
@@ -98,17 +80,15 @@ rewrite was missing. This silently broke:
 - Password-reset links.
 - Social shares of `/court/:sessionId` URLs.
 
-**Fix shipped in this PR:** `vercel.json` now contains an SPA rewrite
-that forwards all non-API paths to `index.html`, plus a default set of
-security headers.
+**Fix:** nginx on the VPS serves `index.html` for every non-API path
+(`try_files $uri $uri/ /index.html;`), plus a default set of security
+headers. The reference config is in [`DEPLOYMENT.md`](./DEPLOYMENT.md).
 
-```json
-{
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
-  ]
-}
+**Verify:**
+
+```bash
+curl -o /dev/null -w "%{http_code}\n" https://enyayasetu.meitcybersolutions.com/dashboard
+# expected: 200
 ```
 
 ### 🔴 Email verification & password reset
@@ -138,8 +118,8 @@ In `index.html`:
 **Fix:** put a static, non-hashed file at `public/og-image.png` and:
 
 ```html
-<meta property="og:image" content="https://enyayasetu.vercel.app/og-image.png" />
-<meta property="og:url"   content="https://enyayasetu.vercel.app/" />
+<meta property="og:image" content="https://enyayasetu.meitcybersolutions.com/og-image.png" />
+<meta property="og:url"   content="https://enyayasetu.meitcybersolutions.com/" />
 ```
 
 ### 🟠 `.env` was tracked in git
@@ -147,8 +127,8 @@ In `index.html`:
 Even after credential rotation, having `.env` tracked invites future
 mistakes. Fixed in this PR by:
 
-- Adding `.env`, `.env.local`, `.env.*.local`, `.env.production`,
-  `.env.development` and `.vercel` to `.gitignore`.
+- Adding `.env`, `.env.local`, `.env.*.local`, `.env.production`
+  and `.env.development` to `.gitignore`.
 - `git rm --cached .env` (file remains on disk locally).
 
 ### 🟠 `.env.example` was UTF-16-LE encoded
@@ -167,8 +147,7 @@ of cases, digits and symbols, and surface the policy in the UI.
 ### 🟠 No rate limiting on auth endpoints
 
 `/api/auth/signin` and `/api/auth/signup` accept unlimited requests.
-Add per-IP rate limiting (e.g. `express-rate-limit` with a memory store
-locally and Upstash Redis on Vercel). Same for `/api/authenticator/*`
+Add per-IP rate limiting (e.g. `express-rate-limit`). Same for `/api/authenticator/*`
 to prevent TOTP brute force.
 
 ### 🟠 JWT signed with HS256 + shared secret
@@ -249,17 +228,17 @@ Pricing & Plans" is title case. Pick one style guide.
 
 ### 🟢 No Sentry / log aggregation
 
-There's no client-side error reporting and Vercel function logs aren't
-forwarded anywhere. Wire Sentry for the React app and Logflare /
-Datadog for the function.
+There's no client-side error reporting and the API's logs on the VPS
+aren't forwarded anywhere. Wire Sentry for the React app and a log
+shipper (e.g. Logflare / Datadog) for the API.
 
 ### 🟢 README and project metadata
 
 - `package.json` `homepage` field is unset. Add `"homepage":
-  "https://enyayasetu.vercel.app"`.
+  "https://enyayasetu.meitcybersolutions.com"`.
 - The GitHub repo description and topics are empty. Suggested topics:
   `legal-tech` · `ai-judge` · `virtual-courtroom` · `indian-law` ·
-  `mysql` · `react` · `vite` · `vercel`.
+  `mysql` · `react` · `vite`.
 
 ### 🟢 Type safety on database calls
 
@@ -281,7 +260,7 @@ A pre-commit hook (or a simple CI step) using `gitleaks` or
 
 ## ✅ Manual QA checklist (run after this PR is deployed)
 
-- [ ] Rotate DB password and `JWT_SECRET` in Hostinger and Vercel.
+- [ ] Rotate DB password and `JWT_SECRET` in Hostinger and in the VPS `.env`.
 - [ ] `/auth`, `/dashboard`, `/court`, `/rti`, `/pricing`, `/admin`,
       `/PASSWORD_RECOVERY` all return **200** when accessed directly.
 - [ ] Sign up with a fresh email → click confirmation link → land on
@@ -297,4 +276,4 @@ A pre-commit hook (or a simple CI step) using `gitleaks` or
 - [ ] RTI tutorial loads (no "Could not load tutorial" toast).
 - [ ] Admin can create / disable a promo code; promo redeems on a payment.
 - [ ] Lighthouse on `/`: Performance ≥ 80, Accessibility ≥ 90, SEO = 100.
-- [ ] `curl https://enyayasetu.vercel.app/api/health` returns 200 JSON.
+- [ ] `curl https://enyayasetu.meitcybersolutions.com/api/health` returns 200 JSON.

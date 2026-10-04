@@ -4,14 +4,14 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { query, queryOne, insert, update, remove } from '../lib/mysql.js';
-import { isAdmin } from '../lib/auth.js';
+import { hasAdminAccess } from '../lib/auth.js';
 
 const router = express.Router();
 
 // Get all cases for user (or all cases if admin)
 router.get('/', authenticate, async (req, res) => {
   try {
-    const userIsAdmin = await isAdmin(req.userId);
+    const userIsAdmin = await hasAdminAccess(req.userId, req.tfaVerified);
     
     let cases;
     if (userIsAdmin) {

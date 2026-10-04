@@ -1,7 +1,7 @@
 // Authentication service (server-side, plain JS)
-// Vercel's @vercel/node runtime cannot resolve `.ts` imports across
-// directories, so this is the canonical server-side copy that all
-// Express routes import from.
+// The API runs under plain Node, which cannot import the `.ts` files in
+// src/, so this is the canonical server-side copy that all Express routes
+// import from.
 //
 // Behaviour mirrors src/services/auth.ts.
 
@@ -12,13 +12,19 @@ import { queryOne, insert, generateUUID } from './mysql.js';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
-function generateToken(userId) {
+function assertJwtSecret() {
   if (!JWT_SECRET || JWT_SECRET === 'your-secret-key-change-in-production') {
     throw new Error(
       'JWT_SECRET is not set. Configure JWT_SECRET in your environment variables.'
     );
   }
-  return jwt.sign({ userId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+}
+
+// `claims` carries extra flags such as { tfa: true } for an admin who has
+// passed the authenticator check.
+function generateToken(userId, claims = {}) {
+  assertJwtSecret();
+  return jwt.sign({ ...claims, userId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 }
 
 function createSession(user, token) {
@@ -116,6 +122,22 @@ export async function signIn(email, password) {
       updated_at: userWithPassword.updated_at,
     };
 
+    // Admin accounts do not get a session from the password alone. They get a
+    // short-lived challenge that must be exchanged, together with an
+    // authenticator code, at /api/authenticator/verify (or /setup on first use).
+    // Normal users are never asked for a code.
+    if (await isAdmin(user.id)) {
+      return {
+        data: {
+          requires2FA: true,
+          setupRequired: !(await isAuthenticatorEnabled()),
+          challengeToken: createChallengeToken(user.id),
+          email: user.email,
+        },
+        error: null,
+      };
+    }
+
     const token = generateToken(user.id);
     return { data: { user, session: createSession(user, token) }, error: null };
   } catch (error) {
@@ -126,7 +148,8 @@ export async function signIn(email, password) {
 export async function verifyToken(token) {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    if (!decoded || !decoded.userId) return null;
+    // Challenge tokens (purpose: '2fa') are not sessions.
+    if (!decoded || !decoded.userId || decoded.purpose) return null;
     return queryOne(
       'SELECT id, email, email_verified, raw_user_meta_data, created_at, updated_at FROM users WHERE id = ?',
       [decoded.userId]
@@ -149,4 +172,64 @@ export async function getUserById(userId) {
     'SELECT id, email, email_verified, raw_user_meta_data, created_at, updated_at FROM users WHERE id = ?',
     [userId]
   );
+}
+
+// ---------------------------------------------------------------------------
+// Admin two-factor (authenticator) helpers
+// ---------------------------------------------------------------------------
+
+const CHALLENGE_PURPOSE = '2fa';
+const CHALLENGE_EXPIRES_IN = '10m';
+
+export async function isAuthenticatorEnabled() {
+  const record = await queryOne(
+    'SELECT id FROM master_authenticator_secret WHERE is_enabled = TRUE LIMIT 1'
+  );
+  return !!record;
+}
+
+// Issued after a correct admin password; only valid for the authenticator routes.
+export function createChallengeToken(userId) {
+  assertJwtSecret();
+  return jwt.sign({ userId, purpose: CHALLENGE_PURPOSE }, JWT_SECRET, {
+    expiresIn: CHALLENGE_EXPIRES_IN,
+  });
+}
+
+// Returns the user id the challenge was issued for, or null.
+export function verifyChallengeToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (!decoded || decoded.purpose !== CHALLENGE_PURPOSE || !decoded.userId) return null;
+    return decoded.userId;
+  } catch (error) {
+    return null;
+  }
+}
+
+// Builds the same { user, session } payload signIn returns.
+export async function issueSession(userId, claims = {}) {
+  const row = await getUserById(userId);
+  if (!row) return null;
+
+  let meta = row.raw_user_meta_data || null;
+  if (typeof meta === 'string') {
+    try {
+      meta = JSON.parse(meta);
+    } catch (error) {
+      meta = null;
+    }
+  }
+
+  const user = { ...row, raw_user_meta_data: meta };
+  const token = generateToken(userId, claims);
+  return { user, session: createSession(user, token) };
+}
+
+// Admin role AND (authenticator passed, or no authenticator configured yet).
+export async function hasAdminAccess(userId, tfaVerified) {
+  if (!(await isAdmin(userId))) return false;
+  if (tfaVerified) return true;
+  return !(await isAuthenticatorEnabled());
 }

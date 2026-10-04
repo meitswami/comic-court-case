@@ -1,6 +1,6 @@
 /**
  * Dynamically determines the API URL based on the current hostname
- * Works across different hosting platforms (Netlify, Render, Vercel, etc.)
+ * In production the frontend and API share one origin (nginx proxies /api).
  * 
  * Strategy:
  * 1. Use VITE_API_URL if set and valid (not localhost in production)
@@ -31,14 +31,13 @@ export function getApiUrl(includeApiPath: boolean = false): string {
     return includeApiPath ? `${cleanUrl}/api` : cleanUrl;
   }
 
-  // Fallback: Use same origin (only works if backend is on same domain)
-  // This is fine for Vercel deployments where frontend and backend are on same domain
+  // Fallback: Use same origin. This is the normal production case: nginx serves
+  // the frontend and proxies /api to the Express server on the same domain.
   const origin = isBrowser ? window.location.origin : '';
   
-  // Production but no VITE_API_URL configured
-  // Since we're using same origin (Vercel), this is fine - no warning needed
-  // Only log a warning if origin is unavailable (which shouldn't happen in browser)
-  // Don't show warning for same origin - that's the correct behavior for Vercel!
+  // Production with no VITE_API_URL configured means same origin, which is
+  // correct - no warning needed. Only log if the origin is unavailable
+  // (which shouldn't happen in a browser).
   if (isBrowser && !envApiUrl && !origin) {
     // Only warn if we can't get origin at all (shouldn't happen)
     console.error('⚠️ Cannot determine API URL - origin unavailable');

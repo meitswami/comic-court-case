@@ -1,6 +1,6 @@
 # 🗺️ eNyayaSetu — Roadmap
 
-A phased plan for evolving https://enyayasetu.vercel.app/ from an
+A phased plan for evolving https://enyayasetu.meitcybersolutions.com/ from an
 AI-courtroom demo into a full-featured legal-tech platform for India.
 
 Effort tags: **S** = ≤ 1 week · **M** = 2–4 weeks · **L** = > 1 month.
@@ -14,7 +14,7 @@ Goal: make the existing experience reliable and shareable.
 | Item                                                                  | Effort |
 | --------------------------------------------------------------------- | :----: |
 | Fix `/api/*` 500s (TS-import / runtime mismatch)                      | S      |
-| Fix SPA 404s with `vercel.json` rewrites                              | S      |
+| Fix SPA 404s (serve `index.html` for deep links)                      | S      |
 | Repair email verification + password reset flows                      | S      |
 | Rotate exposed DB password + JWT secret                               | S      |
 | Replace `/src/assets/logo.png` OG image with a stable static one      | S      |

@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuth, Session, TwoFactorChallenge } from '@/hooks/useAuth';
+import { AuthenticatorModal } from '@/components/AuthenticatorModal';
 import { ArrowLeft, LogIn, UserPlus, Scale, Users, User, ShieldCheck, Gavel } from 'lucide-react';
 import logo from '@/assets/logo.png';
 import { z } from 'zod';
@@ -53,8 +54,11 @@ const Auth = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [autoLoginRole, setAutoLoginRole] = useState<CourtPartyRole | null>(null);
+  // Set only when an admin account signs in: the authenticator dialog opens
+  // and the session is created after the code is verified.
+  const [twoFactor, setTwoFactor] = useState<(TwoFactorChallenge & { redirectTo: string }) | null>(null);
   
-  const { signIn, signUp, isAuthenticated } = useAuth();
+  const { signIn, signUp, isAuthenticated, completeTwoFactor } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -102,7 +106,12 @@ const Auth = () => {
     setIsSubmitting(true);
     
     try {
-      const { error: loginError } = await signIn(dummyUser.email, dummyUser.password);
+      const { error: loginError, twoFactor: challenge } = await signIn(dummyUser.email, dummyUser.password);
+
+      if (challenge) {
+        setTwoFactor({ ...challenge, redirectTo: '/' });
+        return;
+      }
       
       if (loginError) {
         // User doesn't exist, create account
@@ -143,7 +152,13 @@ const Auth = () => {
   const handleSuperAdminLogin = async () => {
     setIsSubmitting(true);
     try {
-      const { error: loginError } = await signIn(SUPERADMIN.email, SUPERADMIN.password);
+      const { error: loginError, twoFactor: challenge } = await signIn(SUPERADMIN.email, SUPERADMIN.password);
+
+      if (challenge) {
+        // Password accepted - the authenticator code is asked next
+        setTwoFactor({ ...challenge, redirectTo: '/admin' });
+        return;
+      }
       
       if (loginError) {
         toast({
@@ -177,6 +192,17 @@ const Auth = () => {
     }
   };
 
+  const handleTwoFactorVerified = (session: Session) => {
+    const redirectTo = twoFactor?.redirectTo || '/';
+    completeTwoFactor(session);
+    setTwoFactor(null);
+    toast({
+      title: 'Welcome, Admin!',
+      description: 'Authenticator verified.',
+    });
+    navigate(redirectTo);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -186,7 +212,12 @@ const Auth = () => {
 
     try {
       if (isLogin) {
-        const { error } = await signIn(email, password);
+        const { error, twoFactor: challenge } = await signIn(email, password);
+        if (challenge) {
+          // Admin account: ask for the authenticator code before signing in
+          setTwoFactor({ ...challenge, redirectTo: '/admin' });
+          return;
+        }
         if (error) {
           const errorMsg = error?.message || 'Login failed';
           if (errorMsg.includes('Invalid') || errorMsg.includes('email') || errorMsg.includes('password')) {
@@ -418,6 +449,15 @@ const Auth = () => {
           </div>
         </div>
       </div>
+
+      {/* Authenticator code - admin accounts only */}
+      <AuthenticatorModal
+        open={!!twoFactor}
+        challengeToken={twoFactor?.challengeToken || ''}
+        setupRequired={twoFactor?.setupRequired || false}
+        onVerified={handleTwoFactorVerified}
+        onCancel={() => setTwoFactor(null)}
+      />
     </div>
   );
 };

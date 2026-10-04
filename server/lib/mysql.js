@@ -1,10 +1,9 @@
 // MySQL Client (server-side, plain JS)
-// Vercel's @vercel/node runtime cannot resolve `.ts` imports across
-// directories, so this is the canonical server-side copy that all
-// Express routes and middleware import from.
+// The API runs under plain Node, which cannot import the `.ts` files in
+// src/, so this is the canonical server-side copy that all Express routes
+// and middleware import from.
 //
-// Behaviour mirrors src/integrations/mysql/client.ts so that the local
-// `npm run server` (tsx) and Vercel serverless runtime stay consistent.
+// Behaviour mirrors src/integrations/mysql/client.ts.
 
 import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';

@@ -77,10 +77,12 @@ app.get('/api', (req, res) => {
   });
 });
 
-// Health check
-app.get('/health', (req, res) => {
+// Health check (also under /api so it is reachable through the /api proxy)
+const healthCheck = (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
+};
+app.get('/health', healthCheck);
+app.get('/api/health', healthCheck);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -102,20 +104,13 @@ async function testDatabaseConnection() {
   }
 }
 
-// Start server (only if not in Vercel serverless environment)
-// Vercel serverless functions don't need app.listen()
-if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
-  app.listen(PORT, async () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
-    console.log(`📁 Upload directory: ${path.join(__dirname, '../public/uploads')}`);
-    console.log('');
-    await testDatabaseConnection();
-  });
-} else {
-  // In Vercel, test database connection on first import
-  testDatabaseConnection().catch(console.error);
-}
+// Start server
+app.listen(PORT, async () => {
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`📁 Upload directory: ${path.join(__dirname, '../public/uploads')}`);
+  console.log('');
+  await testDatabaseConnection();
+});
 
-// Export app for Vercel serverless functions
 export default app;
 

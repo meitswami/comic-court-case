@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { HeroSection } from '@/components/HeroSection';
 import { CaseSelection } from '@/components/CaseSelection';
@@ -6,7 +6,6 @@ import { CourtHearing } from '@/components/CourtHearing';
 import { RoleSelectionModal } from '@/components/RoleSelectionModal';
 import { CaseIntakeChat } from '@/components/CaseIntakeChat';
 import { YourCasesSection } from '@/components/YourCasesSection';
-import { AuthenticatorModal } from '@/components/AuthenticatorModal';
 import { WalletBalance } from '@/components/WalletBalance';
 import { CaseData, generateCustomCase } from '@/data/exampleCases';
 import { Toaster } from '@/components/ui/toaster';
@@ -17,7 +16,6 @@ import { CourtPartyRole } from '@/types/court';
 import { Button } from '@/components/ui/button';
 import { LogIn, LogOut, User, LayoutDashboard, Gavel, IndianRupee } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import { getApiUrl } from '@/utils/apiUrl';
 
 type AppView = 'home' | 'role-select' | 'selection' | 'intake-chat' | 'hearing';
 type SelectionMode = 'example' | 'custom';
@@ -29,83 +27,11 @@ const Index = () => {
   const [selectedRole, setSelectedRole] = useState<CourtPartyRole | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showRoleModal, setShowRoleModal] = useState(false);
-  const [isAuthenticatedVerified, setIsAuthenticatedVerified] = useState(false);
-  const [showAuthenticatorModal, setShowAuthenticatorModal] = useState(false);
   
   const { toast } = useToast();
   const { user, isAuthenticated, signOut, loading } = useAuth();
   const { setLanguage } = useLanguage();
   const navigate = useNavigate();
-
-  // Check session storage on mount
-  useEffect(() => {
-    const checkSessionAuth = async () => {
-      // First check if session is verified
-      const authSession = sessionStorage.getItem('authenticator_session');
-      if (authSession === 'verified') {
-        setIsAuthenticatedVerified(true);
-        setShowAuthenticatorModal(false);
-        return;
-      }
-
-      // If not verified, check if 2FA is actually required (API available)
-      // Only show modal if API is reachable and 2FA is configured
-      try {
-        const API_URL = getApiUrl();
-        
-        // Don't show modal if API is localhost in production
-        if (API_URL.includes('localhost') && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-          console.warn('[Index] API URL points to localhost in production. Skipping 2FA.');
-          setIsAuthenticatedVerified(true); // Allow access without 2FA
-          setShowAuthenticatorModal(false);
-          return;
-        }
-
-        // Quick check if API is reachable
-        const response = await fetch(`${API_URL}/api/authenticator/status`, {
-          method: 'GET',
-          headers: { 'Content-Type': 'application/json' },
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          // Only show modal if 2FA is actually set up
-          if (data.isSetup !== undefined) {
-            setShowAuthenticatorModal(true);
-          } else {
-            // API works but 2FA not configured - allow access
-            setIsAuthenticatedVerified(true);
-            setShowAuthenticatorModal(false);
-          }
-        } else {
-          // API returned error - assume 2FA not required
-          setIsAuthenticatedVerified(true);
-          setShowAuthenticatorModal(false);
-        }
-      } catch (error) {
-        // API unreachable - don't require 2FA (allows app to work without backend)
-        console.warn('[Index] Authenticator API unreachable. Allowing access without 2FA.');
-        setIsAuthenticatedVerified(true);
-        setShowAuthenticatorModal(false);
-      }
-    };
-
-    checkSessionAuth();
-
-    // Listen for storage changes (when tab is opened/closed)
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'authenticator_session') {
-        const authSession = sessionStorage.getItem('authenticator_session');
-        if (authSession === 'verified') {
-          setIsAuthenticatedVerified(true);
-          setShowAuthenticatorModal(false);
-        }
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
 
   const handleSelectExampleCases = () => {
     if (!isAuthenticated) {
@@ -216,38 +142,15 @@ const Index = () => {
 
   const handleLogout = async () => {
     await signOut();
-    // Clear session storage
-    sessionStorage.removeItem('authenticator_session');
-    setIsAuthenticatedVerified(false);
-    setShowAuthenticatorModal(true);
     toast({
       title: 'Logged Out',
       description: 'You have been successfully logged out.',
     });
   };
 
-  const handleAuthenticatorVerified = () => {
-    // Store in sessionStorage (clears when tab closes)
-    sessionStorage.setItem('authenticator_session', 'verified');
-    setIsAuthenticatedVerified(true);
-    setShowAuthenticatorModal(false);
-  };
-
   return (
     <main className="min-h-screen bg-background relative">
-      {/* Blur overlay when authenticator not verified */}
-      {!isAuthenticatedVerified && (
-        <div className="fixed inset-0 z-40 backdrop-blur-md bg-background/80" />
-      )}
-
-      {/* Authenticator Modal */}
-      <AuthenticatorModal
-        open={showAuthenticatorModal && !isAuthenticatedVerified}
-        onVerified={handleAuthenticatorVerified}
-      />
-
-      {/* Main Content - Blurred when not verified */}
-      <div className={!isAuthenticatedVerified ? 'blur-sm pointer-events-none' : ''}>
+      <div>
       {/* Auth Header */}
       {view === 'home' && (
         <div className="absolute top-4 right-4 z-20 flex items-center gap-2">

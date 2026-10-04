@@ -1,3 +1,4 @@
+import { getApiUrl } from '@/utils/apiUrl';
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -39,7 +40,7 @@ interface Suggestion {
   estimatedStrengthAfter: number;
 }
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = getApiUrl();
 
 export const CaseStrengthAnalysis: React.FC<CaseStrengthAnalysisProps> = ({ caseId, userId }) => {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
