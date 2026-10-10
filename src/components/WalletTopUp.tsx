@@ -1,4 +1,3 @@
-import { getApiUrl } from '@/utils/apiUrl';
 import React, { useState, useEffect } from 'react';
 import {
   Dialog,
@@ -11,13 +10,17 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
-import { Wallet, CreditCard, IndianRupee, Loader2 } from 'lucide-react';
-
-const API_URL = getApiUrl();
+import { Wallet, CreditCard, IndianRupee, Loader2, Info } from 'lucide-react';
+import { apiFetch } from '@/lib/api';
+import {
+  fetchActiveGateway,
+  isValidIndianMobile,
+  redirectToCashfree,
+  rememberedPhone,
+  rememberPhone,
+} from '@/lib/cashfree';
 
 interface WalletTopUpProps {
   open: boolean;
@@ -35,10 +38,25 @@ export const WalletTopUp: React.FC<WalletTopUpProps> = ({
   onBalanceUpdate,
 }) => {
   const [amount, setAmount] = useState<string>('');
-  const [paymentMethod, setPaymentMethod] = useState<'razorpay' | 'phonepe'>('razorpay');
+  const [gateway, setGateway] = useState<'cashfree' | null>(null);
+  const [gatewayChecked, setGatewayChecked] = useState(false);
+  const [phone, setPhone] = useState(rememberedPhone());
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
   const { session } = useAuth();
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    fetchActiveGateway().then((active) => {
+      if (cancelled) return;
+      setGateway(active.gateway);
+      setGatewayChecked(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   const handleQuickAmount = (value: number) => {
     setAmount(value.toString());
@@ -46,7 +64,7 @@ export const WalletTopUp: React.FC<WalletTopUpProps> = ({
 
   const handleTopUp = async () => {
     const topUpAmount = parseFloat(amount);
-    
+
     if (isNaN(topUpAmount) || topUpAmount <= 0) {
       toast({
         title: 'Invalid Amount',
@@ -65,60 +83,43 @@ export const WalletTopUp: React.FC<WalletTopUpProps> = ({
       return;
     }
 
+    if (!gateway) {
+      toast({
+        title: 'Online Payment Not Available',
+        description: 'Wallet top-ups are not switched on yet. Please contact support.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!isValidIndianMobile(phone)) {
+      toast({
+        title: 'Mobile Number Required',
+        description: 'Enter a valid 10-digit mobile number. The payment gateway needs it.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setLoading(true);
     try {
-      // Get access token
-      const token = session?.access_token;
-      if (!token) {
+      if (!session?.access_token) {
         throw new Error('Please log in to top up your wallet');
       }
 
-      // Create payment via API
-      const response = await fetch(`${API_URL}/api/payments/create`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      const payment = await apiFetch('/payments/create', {
+        body: {
           amount: topUpAmount,
-          gateway: paymentMethod,
-          metadata: { type: 'wallet_topup' },
-        }),
+          gateway,
+          type: 'wallet_topup',
+          customer_phone: phone,
+        },
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to create payment');
-      }
-
-      if (data?.id) {
-        // Payment created successfully
-        // For Razorpay/PhonePe, redirect to payment page
-        // This will be handled by the payment gateway integration
-        toast({
-          title: 'Payment Initiated',
-          description: `Payment of ₹${topUpAmount} has been initiated. You will be redirected to complete the payment.`,
-        });
-
-        // TODO: Integrate actual payment gateway redirect here
-        // For now, we'll just close the modal and refresh balance
-        // In production, redirect to gateway payment page
-        
-        // Close dialog and reset
-        onClose();
-        setAmount('');
-        
-        // Refresh balance if callback provided
-        if (onBalanceUpdate) {
-          // Balance will be updated via webhook after payment completes
-          // For now, show a message
-          setTimeout(() => {
-            onBalanceUpdate(currentBalance); // Trigger refresh
-          }, 1000);
-        }
-      }
+      rememberPhone(phone);
+      // Continues on Cashfree's page. The wallet is credited once Cashfree
+      // confirms the payment, and the customer lands on /payment/return.
+      await redirectToCashfree(payment);
     } catch (error: any) {
       console.error('Error initiating payment:', error);
       toast({
@@ -191,35 +192,40 @@ export const WalletTopUp: React.FC<WalletTopUpProps> = ({
           </div>
 
           {/* Payment Method */}
-          <div className="space-y-3">
-            <Label>Payment Method</Label>
-            <RadioGroup value={paymentMethod} onValueChange={(value: any) => setPaymentMethod(value)}>
-              <div className="flex items-center space-x-2 p-3 border rounded-lg hover:bg-muted/50 cursor-pointer">
-                <RadioGroupItem value="razorpay" id="razorpay" />
-                <Label htmlFor="razorpay" className="flex-1 cursor-pointer flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CreditCard className="w-4 h-4" />
-                    <span>Razorpay</span>
-                  </div>
-                  <Badge variant="outline">Recommended</Badge>
-                </Label>
+          {gateway ? (
+            <div className="space-y-3">
+              <Label>Payment Method</Label>
+              <div className="flex items-center gap-2 p-3 border rounded-lg">
+                <CreditCard className="w-4 h-4" />
+                <span>Card / UPI / Net Banking (Cashfree)</span>
               </div>
-              <div className="flex items-center space-x-2 p-3 border rounded-lg hover:bg-muted/50 cursor-pointer">
-                <RadioGroupItem value="phonepe" id="phonepe" />
-                <Label htmlFor="phonepe" className="flex-1 cursor-pointer flex items-center gap-2">
-                  <CreditCard className="w-4 h-4" />
-                  <span>PhonePe</span>
-                </Label>
+              <div className="space-y-1">
+                <Label htmlFor="topup_phone">Mobile number for payment</Label>
+                <Input
+                  id="topup_phone"
+                  type="tel"
+                  inputMode="numeric"
+                  placeholder="10-digit mobile number"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                />
               </div>
-            </RadioGroup>
-          </div>
+            </div>
+          ) : (
+            gatewayChecked && (
+              <div className="flex items-start gap-2 p-3 bg-muted/50 rounded-lg text-sm">
+                <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <span>Online top-ups are not switched on yet. Please contact support to add money to your wallet.</span>
+              </div>
+            )
+          )}
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={loading}>
             Cancel
           </Button>
-          <Button onClick={handleTopUp} disabled={loading || !amount}>
+          <Button onClick={handleTopUp} disabled={loading || !amount || !gateway}>
             {loading ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />

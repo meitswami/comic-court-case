@@ -5,6 +5,7 @@
 //
 // Behaviour mirrors src/integrations/mysql/client.ts.
 
+import crypto from 'crypto';
 import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
 
@@ -55,8 +56,10 @@ export async function queryOne(sql, params) {
 }
 
 export async function insert(table, data) {
-  const keys = Object.keys(data);
-  const values = Object.values(data);
+  // Skip undefined values so the column's default applies (mysql2 rejects
+  // undefined bind parameters).
+  const keys = Object.keys(data).filter((key) => data[key] !== undefined);
+  const values = keys.map((key) => data[key]);
   const placeholders = keys.map(() => '?').join(', ');
   const sql = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders})`;
   const [result] = await pool.execute(sql, values);
@@ -64,9 +67,11 @@ export async function insert(table, data) {
 }
 
 export async function update(table, data, where) {
-  const setClause = Object.keys(data).map((key) => `${key} = ?`).join(', ');
+  const dataKeys = Object.keys(data).filter((key) => data[key] !== undefined);
+  if (dataKeys.length === 0) return { affectedRows: 0 };
+  const setClause = dataKeys.map((key) => `${key} = ?`).join(', ');
   const whereClause = Object.keys(where).map((key) => `${key} = ?`).join(' AND ');
-  const values = [...Object.values(data), ...Object.values(where)];
+  const values = [...dataKeys.map((key) => data[key]), ...Object.values(where)];
   const sql = `UPDATE ${table} SET ${setClause} WHERE ${whereClause}`;
   const [result] = await pool.execute(sql, values);
   return { affectedRows: result.affectedRows };
@@ -80,12 +85,10 @@ export async function remove(table, where) {
   return { affectedRows: result.affectedRows };
 }
 
+// Ids double as hard-to-guess references (a court session id is an invitation),
+// so they come from the system's secure random source.
 export function generateUUID() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+  return crypto.randomUUID();
 }
 
 export async function closePool() {

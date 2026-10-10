@@ -1,51 +1,22 @@
 // AI Routes
-// Handles AI-related endpoints (converted from Edge Functions)
+//
+// Older paths kept for compatibility. The real implementations live in
+// server/routes/functions.js (POST /api/functions/<name>).
 
 import express from 'express';
-import { authenticate } from '../middleware/auth.js';
+import functionRoutes from './functions.js';
 
 const router = express.Router();
 
-// AI Judge endpoint (from ai-judge Edge Function)
-router.post('/judge', authenticate, async (req, res) => {
-  try {
-    // TODO: Implement AI judge logic
-    // This should call your AI service (OpenAI, local Ollama, etc.)
-    res.json({ message: 'AI judge endpoint - to be implemented' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+const ALIASES = {
+  '/judge': '/ai-judge',
+  '/case-intake-chat': '/case-intake-chat',
+  '/court-chat': '/court-chat',
+};
 
-// AI Router endpoint (from ai-router Edge Function)
-router.post('/router', authenticate, async (req, res) => {
-  try {
-    // TODO: Implement AI routing logic
-    res.json({ message: 'AI router endpoint - to be implemented' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Case intake chat (from case-intake-chat Edge Function)
-router.post('/case-intake-chat', authenticate, async (req, res) => {
-  try {
-    // TODO: Implement case intake chat logic
-    res.json({ message: 'Case intake chat endpoint - to be implemented' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Court chat (from court-chat Edge Function)
-router.post('/court-chat', authenticate, async (req, res) => {
-  try {
-    // TODO: Implement court chat logic
-    res.json({ message: 'Court chat endpoint - to be implemented' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+router.post(Object.keys(ALIASES), (req, res, next) => {
+  req.url = ALIASES[req.path];
+  functionRoutes(req, res, next);
 });
 
 export default router;
-

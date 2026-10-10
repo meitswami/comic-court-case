@@ -15,11 +15,13 @@ import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import {
-  CreditCard,
   RefreshCw,
   Settings,
   Loader2,
   AlertCircle,
+  CheckCircle2,
+  Copy,
+  PlugZap,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
@@ -36,23 +38,71 @@ interface GatewaySetting {
   updated_at: string;
 }
 
+type FieldKey = 'api_key' | 'api_secret' | 'merchant_id' | 'salt_key' | 'salt_index';
+
+interface GatewayField {
+  key: FieldKey;
+  label: string;
+  placeholder: string;
+  secret?: boolean;
+}
+
+interface GatewayDefinition {
+  id: 'cashfree' | 'razorpay' | 'phonepe';
+  name: string;
+  description: string;
+  // Checkout is built and payments can be taken.
+  connected: boolean;
+  fields: GatewayField[];
+}
+
+const GATEWAYS: GatewayDefinition[] = [
+  {
+    id: 'cashfree',
+    name: 'Cashfree',
+    description: 'Cards, UPI, net banking and wallets through Cashfree Payments',
+    connected: true,
+    fields: [
+      { key: 'api_key', label: 'App ID', placeholder: 'Your Cashfree App ID (x-client-id)' },
+      { key: 'api_secret', label: 'Secret Key', placeholder: 'Your Cashfree Secret Key', secret: true },
+    ],
+  },
+  {
+    id: 'razorpay',
+    name: 'Razorpay',
+    description: 'Keys can be stored, but checkout is not connected yet',
+    connected: false,
+    fields: [
+      { key: 'api_key', label: 'API Key', placeholder: 'rzp_test_...' },
+      { key: 'api_secret', label: 'API Secret', placeholder: 'Your Razorpay key secret', secret: true },
+    ],
+  },
+  {
+    id: 'phonepe',
+    name: 'PhonePe',
+    description: 'Keys can be stored, but checkout is not connected yet',
+    connected: false,
+    fields: [
+      { key: 'merchant_id', label: 'Merchant ID', placeholder: 'MERCHANTUAT' },
+      { key: 'salt_key', label: 'Salt Key', placeholder: 'Your PhonePe salt key', secret: true },
+      { key: 'salt_index', label: 'Salt Index', placeholder: '1' },
+    ],
+  },
+];
+
+const emptyForm = { api_key: '', api_secret: '', merchant_id: '', salt_key: '', salt_index: '' };
+
 export const PaymentGatewaySettings: React.FC = () => {
   const [gateways, setGateways] = useState<GatewaySetting[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showRazorpayModal, setShowRazorpayModal] = useState(false);
-  const [showPhonePeModal, setShowPhonePeModal] = useState(false);
-  const [razorpayData, setRazorpayData] = useState({
-    api_key: '',
-    api_secret: '',
-    test_mode: true,
-  });
-  const [phonepeData, setPhonepeData] = useState({
-    merchant_id: '',
-    salt_key: '',
-    salt_index: '',
-    test_mode: true,
-  });
+  const [editing, setEditing] = useState<GatewayDefinition | null>(null);
+  const [form, setForm] = useState<Record<FieldKey, string>>(emptyForm);
+  const [testMode, setTestMode] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
   const { toast } = useToast();
+
+  const webhookUrl = `${window.location.origin}/api/payments/cashfree/webhook`;
 
   useEffect(() => {
     fetchGateways();
@@ -68,32 +118,11 @@ export const PaymentGatewaySettings: React.FC = () => {
 
       if (error) throw error;
       setGateways(data || []);
-      
-      // Pre-fill forms if data exists
-      const razorpay = data?.find(g => g.gateway === 'razorpay');
-      const phonepe = data?.find(g => g.gateway === 'phonepe');
-      
-      if (razorpay) {
-        setRazorpayData({
-          api_key: razorpay.api_key || '',
-          api_secret: razorpay.api_secret || '',
-          test_mode: razorpay.test_mode ?? true,
-        });
-      }
-      
-      if (phonepe) {
-        setPhonepeData({
-          merchant_id: phonepe.merchant_id || '',
-          salt_key: phonepe.salt_key || '',
-          salt_index: phonepe.salt_index || '',
-          test_mode: phonepe.test_mode ?? true,
-        });
-      }
     } catch (error: any) {
       console.error('Error fetching gateway settings:', error);
       toast({
         title: 'Error',
-        description: 'Failed to fetch payment gateway settings.',
+        description: error.message || 'Failed to fetch payment gateway settings.',
         variant: 'destructive',
       });
     } finally {
@@ -101,171 +130,141 @@ export const PaymentGatewaySettings: React.FC = () => {
     }
   };
 
-  const handleToggleGateway = async (gatewayId: string, currentStatus: boolean) => {
-    if (currentStatus) {
-      // Deactivating
-      try {
-        const { error } = await supabase
-          .from('payment_gateway_settings')
-          .update({ is_active: false })
-          .eq('id', gatewayId);
+  const settingFor = (id: string) => gateways.find((g) => g.gateway === id);
 
-        if (error) throw error;
-        fetchGateways();
-      } catch (error: any) {
-        toast({
-          title: 'Error',
-          description: 'Failed to deactivate gateway.',
-          variant: 'destructive',
-        });
-      }
-    } else {
-      // Activating - will be handled by database trigger to deactivate others
-      try {
-        const { error } = await supabase
-          .from('payment_gateway_settings')
-          .update({ is_active: true })
-          .eq('id', gatewayId);
+  const isConfigured = (definition: GatewayDefinition) => {
+    const setting = settingFor(definition.id);
+    return !!setting && definition.fields.every((field) => !!setting[field.key]);
+  };
 
-        if (error) throw error;
-        fetchGateways();
-        toast({
-          title: 'Success',
-          description: 'Payment gateway activated. Other gateways have been deactivated.',
-        });
-      } catch (error: any) {
-        toast({
-          title: 'Error',
-          description: error.message || 'Failed to activate gateway.',
-          variant: 'destructive',
-        });
-      }
+  const openEditor = (definition: GatewayDefinition) => {
+    const setting = settingFor(definition.id);
+    const next = { ...emptyForm };
+    definition.fields.forEach((field) => {
+      // Saved secrets are never sent back to the browser, so their inputs start empty.
+      next[field.key] = field.secret ? '' : setting?.[field.key] || '';
+    });
+    setForm(next);
+    setTestMode(setting?.test_mode ?? true);
+    setEditing(definition);
+  };
+
+  const handleToggle = async (definition: GatewayDefinition) => {
+    const setting = settingFor(definition.id);
+    if (!setting) return;
+    try {
+      const { error } = await supabase
+        .from('payment_gateway_settings')
+        .update({ is_active: !setting.is_active })
+        .eq('id', setting.id);
+
+      if (error) throw error;
+      toast({
+        title: setting.is_active ? 'Gateway Deactivated' : 'Gateway Activated',
+        description: setting.is_active
+          ? `${definition.name} is no longer offered at checkout.`
+          : `${definition.name} is now offered at checkout. Any other gateway was deactivated.`,
+      });
+      fetchGateways();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to change the gateway status.',
+        variant: 'destructive',
+      });
     }
   };
 
-  const handleSaveRazorpay = async () => {
-    if (!razorpayData.api_key || !razorpayData.api_secret) {
+  const handleSave = async () => {
+    if (!editing) return;
+    const setting = settingFor(editing.id);
+
+    const missing = editing.fields.filter((field) => {
+      const alreadySaved = field.secret && !!setting?.[field.key];
+      return !form[field.key].trim() && !alreadySaved;
+    });
+    if (missing.length > 0) {
       toast({
         title: 'Validation Error',
-        description: 'API Key and API Secret are required.',
+        description: `${missing.map((f) => f.label).join(' and ')} ${missing.length > 1 ? 'are' : 'is'} required.`,
         variant: 'destructive',
       });
       return;
     }
 
-    try {
-      const { data: existing } = await supabase
-        .from('payment_gateway_settings')
-        .select('id')
-        .eq('gateway', 'razorpay')
-        .single();
+    const values: Record<string, any> = { test_mode: testMode };
+    editing.fields.forEach((field) => {
+      const value = form[field.key].trim();
+      // A blank secret means "keep the saved one".
+      if (value || !field.secret) values[field.key] = value;
+    });
 
-      if (existing) {
+    setSaving(true);
+    try {
+      if (setting) {
         const { error } = await supabase
           .from('payment_gateway_settings')
-          .update({
-            api_key: razorpayData.api_key,
-            api_secret: razorpayData.api_secret,
-            test_mode: razorpayData.test_mode,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', existing.id);
-
+          .update(values)
+          .eq('id', setting.id);
         if (error) throw error;
       } else {
         const { error } = await supabase
           .from('payment_gateway_settings')
-          .insert({
-            gateway: 'razorpay',
-            api_key: razorpayData.api_key,
-            api_secret: razorpayData.api_secret,
-            test_mode: razorpayData.test_mode,
-            is_active: false,
-          });
-
+          .insert({ gateway: editing.id, is_active: false, ...values });
         if (error) throw error;
       }
 
       toast({
-        title: 'Success',
-        description: 'Razorpay settings saved successfully.',
+        title: 'Saved',
+        description: `${editing.name} settings saved.`,
       });
-
-      setShowRazorpayModal(false);
+      setEditing(null);
       fetchGateways();
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to save Razorpay settings.',
+        description: error.message || `Failed to save ${editing.name} settings.`,
         variant: 'destructive',
       });
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleSavePhonePe = async () => {
-    if (!phonepeData.merchant_id || !phonepeData.salt_key || !phonepeData.salt_index) {
-      toast({
-        title: 'Validation Error',
-        description: 'Merchant ID, Salt Key, and Salt Index are required.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
+  const handleTestCashfree = async () => {
+    setTesting(true);
     try {
-      const { data: existing } = await supabase
-        .from('payment_gateway_settings')
-        .select('id')
-        .eq('gateway', 'phonepe')
-        .single();
-
-      if (existing) {
-        const { error } = await supabase
-          .from('payment_gateway_settings')
-          .update({
-            merchant_id: phonepeData.merchant_id,
-            salt_key: phonepeData.salt_key,
-            salt_index: phonepeData.salt_index,
-            test_mode: phonepeData.test_mode,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', existing.id);
-
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from('payment_gateway_settings')
-          .insert({
-            gateway: 'phonepe',
-            merchant_id: phonepeData.merchant_id,
-            salt_key: phonepeData.salt_key,
-            salt_index: phonepeData.salt_index,
-            test_mode: phonepeData.test_mode,
-            is_active: false,
-          });
-
-        if (error) throw error;
-      }
-
-      toast({
-        title: 'Success',
-        description: 'PhonePe settings saved successfully.',
+      const { data, error } = await supabase.functions.invoke('admin-settings', {
+        body: { action: 'test-cashfree' },
       });
-
-      setShowPhonePeModal(false);
-      fetchGateways();
+      if (error) throw error;
+      toast({
+        title: data?.ok ? 'Connection Successful' : 'Connection Failed',
+        description: data?.message,
+        variant: data?.ok ? 'default' : 'destructive',
+      });
     } catch (error: any) {
       toast({
-        title: 'Error',
-        description: error.message || 'Failed to save PhonePe settings.',
+        title: 'Connection Failed',
+        description: error.message || 'Could not test the Cashfree connection.',
         variant: 'destructive',
       });
+    } finally {
+      setTesting(false);
     }
   };
 
-  const razorpay = gateways.find(g => g.gateway === 'razorpay');
-  const phonepe = gateways.find(g => g.gateway === 'phonepe');
-  const activeGateway = gateways.find(g => g.is_active);
+  const copyWebhook = async () => {
+    try {
+      await navigator.clipboard.writeText(webhookUrl);
+      toast({ title: 'Copied', description: 'Webhook URL copied.' });
+    } catch {
+      toast({ title: 'Copy failed', description: webhookUrl });
+    }
+  };
+
+  const activeGateway = gateways.find((g) => g.is_active);
+  const activeDefinition = GATEWAYS.find((g) => g.id === activeGateway?.gateway);
 
   if (loading) {
     return (
@@ -291,201 +290,142 @@ export const PaymentGatewaySettings: React.FC = () => {
         </Button>
       </div>
 
-      {/* Active Gateway Alert */}
-      {activeGateway && (
+      {activeGateway ? (
         <Alert>
-          <AlertCircle className="h-4 w-4" />
+          <CheckCircle2 className="h-4 w-4" />
           <AlertTitle>Active Gateway</AlertTitle>
           <AlertDescription>
-            <strong>{activeGateway.gateway.toUpperCase()}</strong> is currently active.
-            Activating another gateway will automatically deactivate this one.
+            <strong>{activeDefinition?.name || activeGateway.gateway}</strong> is currently active
+            {activeGateway.test_mode ? ' in test mode - no real money is collected.' : ' in live mode.'}
+          </AlertDescription>
+        </Alert>
+      ) : (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>No gateway is active</AlertTitle>
+          <AlertDescription>
+            Customers can only pay from their wallet until a gateway is configured and activated.
           </AlertDescription>
         </Alert>
       )}
 
       {/* Gateways */}
       <div className="grid md:grid-cols-2 gap-6">
-        {/* Razorpay */}
-        <div className="border-2 border-foreground rounded-xl p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-semibold">Razorpay</h3>
-              <p className="text-sm text-muted-foreground">Razorpay payment gateway</p>
-            </div>
-            <Badge variant={razorpay?.is_active ? 'default' : 'secondary'}>
-              {razorpay?.is_active ? 'Active' : 'Inactive'}
-            </Badge>
-          </div>
-          
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm">Status</span>
-              <Switch
-                checked={razorpay?.is_active || false}
-                onCheckedChange={() => razorpay && handleToggleGateway(razorpay.id, razorpay.is_active)}
-                disabled={!razorpay?.api_key || !razorpay?.api_secret}
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm">Test Mode</span>
-              <Badge variant="outline">
-                {razorpay?.test_mode ? 'Yes' : 'No'}
-              </Badge>
-            </div>
-          </div>
+        {GATEWAYS.map((definition) => {
+          const setting = settingFor(definition.id);
+          const configured = isConfigured(definition);
+          return (
+            <div key={definition.id} className="border-2 border-foreground rounded-xl p-6 space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold">{definition.name}</h3>
+                  <p className="text-sm text-muted-foreground">{definition.description}</p>
+                </div>
+                {definition.connected ? (
+                  <Badge variant={setting?.is_active ? 'default' : 'secondary'}>
+                    {setting?.is_active ? 'Active' : 'Inactive'}
+                  </Badge>
+                ) : (
+                  <Badge variant="outline">Not connected</Badge>
+                )}
+              </div>
 
-          <Button
-            variant="outline"
-            className="w-full"
-            onClick={() => setShowRazorpayModal(true)}
-          >
-            <Settings className="w-4 h-4 mr-2" />
-            Configure Razorpay
-          </Button>
-        </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Status</span>
+                  <Switch
+                    checked={setting?.is_active || false}
+                    onCheckedChange={() => handleToggle(definition)}
+                    disabled={!setting?.is_active && (!definition.connected || !configured)}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Keys</span>
+                  <Badge variant="outline">{configured ? 'Saved' : 'Not set'}</Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Test Mode</span>
+                  <Badge variant="outline">{setting?.test_mode ?? true ? 'Yes' : 'No'}</Badge>
+                </div>
+              </div>
 
-        {/* PhonePe */}
-        <div className="border-2 border-foreground rounded-xl p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-semibold">PhonePe</h3>
-              <p className="text-sm text-muted-foreground">PhonePe payment gateway</p>
-            </div>
-            <Badge variant={phonepe?.is_active ? 'default' : 'secondary'}>
-              {phonepe?.is_active ? 'Active' : 'Inactive'}
-            </Badge>
-          </div>
-          
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm">Status</span>
-              <Switch
-                checked={phonepe?.is_active || false}
-                onCheckedChange={() => phonepe && handleToggleGateway(phonepe.id, phonepe.is_active)}
-                disabled={!phonepe?.merchant_id || !phonepe?.salt_key || !phonepe?.salt_index}
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm">Test Mode</span>
-              <Badge variant="outline">
-                {phonepe?.test_mode ? 'Yes' : 'No'}
-              </Badge>
-            </div>
-          </div>
+              {definition.id === 'cashfree' && (
+                <div className="space-y-2 rounded-lg bg-muted/50 p-3">
+                  <Label className="text-xs">Webhook URL (add this in your Cashfree dashboard)</Label>
+                  <div className="flex gap-2">
+                    <Input readOnly value={webhookUrl} className="font-mono text-xs" />
+                    <Button variant="outline" size="icon" onClick={copyWebhook} aria-label="Copy webhook URL">
+                      <Copy className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
 
-          <Button
-            variant="outline"
-            className="w-full"
-            onClick={() => setShowPhonePeModal(true)}
-          >
-            <Settings className="w-4 h-4 mr-2" />
-            Configure PhonePe
-          </Button>
-        </div>
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" onClick={() => openEditor(definition)}>
+                  <Settings className="w-4 h-4 mr-2" />
+                  Configure
+                </Button>
+                {definition.id === 'cashfree' && (
+                  <Button variant="outline" onClick={handleTestCashfree} disabled={!configured || testing}>
+                    {testing ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <PlugZap className="w-4 h-4 mr-2" />
+                    )}
+                    Test
+                  </Button>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      {/* Razorpay Configuration Modal */}
-      <Dialog open={showRazorpayModal} onOpenChange={setShowRazorpayModal}>
+      {/* Configuration Modal */}
+      <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Configure Razorpay</DialogTitle>
+            <DialogTitle>Configure {editing?.name}</DialogTitle>
             <DialogDescription>
-              Enter your Razorpay API credentials
+              {editing?.id === 'cashfree'
+                ? 'Enter the App ID and Secret Key from Cashfree Dashboard > Developers > API Keys. Use test keys with Test Mode on, and production keys with it off.'
+                : `Enter your ${editing?.name} credentials.`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="razorpay_api_key">API Key *</Label>
-              <Input
-                id="razorpay_api_key"
-                type="password"
-                value={razorpayData.api_key}
-                onChange={(e) => setRazorpayData({ ...razorpayData, api_key: e.target.value })}
-                placeholder="rzp_test_..."
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="razorpay_api_secret">API Secret *</Label>
-              <Input
-                id="razorpay_api_secret"
-                type="password"
-                value={razorpayData.api_secret}
-                onChange={(e) => setRazorpayData({ ...razorpayData, api_secret: e.target.value })}
-                placeholder="••••••••"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={razorpayData.test_mode}
-                onCheckedChange={(checked) => setRazorpayData({ ...razorpayData, test_mode: checked })}
-              />
-              <Label>Test Mode</Label>
+            {editing?.fields.map((field) => {
+              const saved = field.secret && !!settingFor(editing.id)?.[field.key];
+              return (
+                <div className="space-y-2" key={field.key}>
+                  <Label htmlFor={`${editing.id}_${field.key}`}>{field.label} *</Label>
+                  <Input
+                    id={`${editing.id}_${field.key}`}
+                    type={field.secret ? 'password' : 'text'}
+                    autoComplete="off"
+                    value={form[field.key]}
+                    onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
+                    placeholder={saved ? 'Saved - leave blank to keep the current one' : field.placeholder}
+                  />
+                </div>
+              );
+            })}
+            <div className="flex items-center space-x-2">
+              <Switch checked={testMode} onCheckedChange={setTestMode} />
+              <Label>Test Mode (sandbox - no real money)</Label>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowRazorpayModal(false)}>
+            <Button variant="outline" onClick={() => setEditing(null)} disabled={saving}>
               Cancel
             </Button>
-            <Button onClick={handleSaveRazorpay}>Save Settings</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* PhonePe Configuration Modal */}
-      <Dialog open={showPhonePeModal} onOpenChange={setShowPhonePeModal}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Configure PhonePe</DialogTitle>
-            <DialogDescription>
-              Enter your PhonePe merchant credentials
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="phonepe_merchant_id">Merchant ID *</Label>
-              <Input
-                id="phonepe_merchant_id"
-                value={phonepeData.merchant_id}
-                onChange={(e) => setPhonepeData({ ...phonepeData, merchant_id: e.target.value })}
-                placeholder="MERCHANTUAT"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="phonepe_salt_key">Salt Key *</Label>
-              <Input
-                id="phonepe_salt_key"
-                type="password"
-                value={phonepeData.salt_key}
-                onChange={(e) => setPhonepeData({ ...phonepeData, salt_key: e.target.value })}
-                placeholder="••••••••"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="phonepe_salt_index">Salt Index *</Label>
-              <Input
-                id="phonepe_salt_index"
-                value={phonepeData.salt_index}
-                onChange={(e) => setPhonepeData({ ...phonepeData, salt_index: e.target.value })}
-                placeholder="1"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={phonepeData.test_mode}
-                onCheckedChange={(checked) => setPhonepeData({ ...phonepeData, test_mode: checked })}
-              />
-              <Label>Test Mode</Label>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowPhonePeModal(false)}>
-              Cancel
+            <Button onClick={handleSave} disabled={saving}>
+              {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Save Settings
             </Button>
-            <Button onClick={handleSavePhonePe}>Save Settings</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   );
 };
-

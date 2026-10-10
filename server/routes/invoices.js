@@ -3,29 +3,47 @@
 
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { query, queryOne, insert } from '../lib/mysql.js';
+import { query, queryOne, insert, generateUUID } from '../lib/mysql.js';
 
 const router = express.Router();
 
-// Generate invoice (from generate-invoice Edge Function)
+// Get (or create) the invoice for one of the caller's completed payments.
+// Amounts always come from the payment record, never from the request.
 router.post('/generate', authenticate, async (req, res) => {
   try {
-    const { payment_id, amount, tax_amount, discount_amount } = req.body;
+    const { payment_id } = req.body;
+
+    const payment = await queryOne(
+      "SELECT id, amount FROM payments WHERE id = ? AND user_id = ? AND status = 'completed'",
+      [payment_id, req.userId]
+    );
+    if (!payment) {
+      return res.status(404).json({ error: 'Completed payment not found' });
+    }
+
+    const existing = await queryOne('SELECT * FROM invoices WHERE payment_id = ? AND user_id = ?', [
+      payment_id,
+      req.userId,
+    ]);
+    if (existing) {
+      return res.json(existing);
+    }
     
-    // Generate invoice number
     const invoiceNumber = await generateInvoiceNumber();
+    const amount = Number(payment.amount);
     
-    const invoiceId = require('crypto').randomUUID();
+    const invoiceId = generateUUID();
     await insert('invoices', {
       id: invoiceId,
       invoice_number: invoiceNumber,
       user_id: req.userId,
       payment_id,
       amount,
-      tax_amount: tax_amount || 0,
-      discount_amount: discount_amount || 0,
-      total_amount: amount + (tax_amount || 0) - (discount_amount || 0),
-      status: 'generated',
+      tax_amount: 0,
+      discount_amount: 0,
+      total_amount: amount,
+      status: 'paid',
+      paid_at: new Date(),
     });
     
     const invoice = await queryOne('SELECT * FROM invoices WHERE id = ?', [invoiceId]);

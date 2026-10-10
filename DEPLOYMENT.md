@@ -37,6 +37,9 @@ nano .env          # DB_*, JWT_SECRET, API_PORT=3000, NODE_ENV=production; leave
 # Apply every numbered file in mysql/migrations/ (mysql CLI or phpMyAdmin)
 mysql -h "$DB_HOST" -u "$DB_USER" -p "$DB_NAME" < mysql/migrations/001_initial_schema.sql
 
+# Then bring the schema up to date (safe to run any number of times)
+npm run migrate
+
 npm run build      # writes the frontend to dist/
 ```
 
@@ -63,8 +66,12 @@ WantedBy=multi-user.target
 ```
 
 `WorkingDirectory` must be the repo root: the server reads `.env` from
-there and stores evidence uploads in `public/uploads/`, so the service
-user needs write access to that folder.
+there and stores uploaded files (evidence, identity documents, court
+recordings) in `storage/`, so the service user needs write access to the
+repo folder. `storage/` is outside the web root; files are only served
+through signed links from `/api/storage/...`. **Include `storage/` in your
+backups** - it is not in git. Set `STORAGE_DIR` in `.env` to keep it
+somewhere else.
 
 ```bash
 sudo systemctl daemon-reload
@@ -97,8 +104,9 @@ server {
     root /var/www/enyayasetu/dist;
     index index.html;
 
-    # Evidence uploads are limited to 10 MB by the API
-    client_max_body_size 10m;
+    # Evidence is limited to 25 MB by the API; court recordings (video) can
+    # be up to 500 MB. Anything larger than this value is rejected by nginx.
+    client_max_body_size 500m;
 
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "SAMEORIGIN" always;
@@ -157,7 +165,12 @@ npm run build                          # frontend changes
 sudo systemctl restart enyayasetu-api  # backend changes
 ```
 
-Apply any new files in `mysql/migrations/` before restarting the API.
+Run the database upgrade before restarting the API whenever the code
+changes:
+
+```bash
+npm run migrate    # idempotent; works on MySQL 8 and MariaDB
+```
 
 ## 5. Checks after every deploy
 
@@ -169,6 +182,29 @@ curl -o /dev/null -w "%{http_code}\n" https://enyayasetu.meitcybersolutions.com/
 
 Then sign in once as a normal user and once as an admin.
 
+## 6. Keys and payments (Super Admin)
+
+Nothing below goes in `.env`; a Super Admin enters it in the admin console.
+
+| What | Where | Needed for |
+| ---- | ----- | ---------- |
+| Cashfree App ID + Secret Key | Admin > Gateways > Cashfree > Configure | Online payments (wallet top-up, hearing, add-ons) |
+| AI API key (Gemini `AIza...` or OpenAI `sk-...`) | Admin > Settings > AI | AI judge, intake chat, OCR, evidence analysis |
+| ElevenLabs API key | Admin > Settings > Voice | Live transcription and spoken replies |
+| Resend API key + sender | Admin > Settings > Email | Verification emails, lawyer OTP |
+
+Cashfree checklist:
+
+1. Save the **test** keys with Test Mode on, press **Test**, then switch
+   the gateway **Active** and make a test payment.
+2. In the Cashfree dashboard add the webhook URL shown on the Gateways tab
+   (`https://<your-domain>/api/payments/cashfree/webhook`).
+3. For live payments: whitelist the site's domain in the Cashfree
+   dashboard, save the **production** keys and turn Test Mode off.
+
+A payment is only treated as paid after this server has confirmed it with
+Cashfree; the browser and the webhook are never trusted on their own.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
@@ -177,4 +213,8 @@ Then sign in once as a normal user and once as an admin.
 | `/dashboard` returns 404 on refresh | `try_files … /index.html` missing from the `location /` block |
 | Login returns "JWT_SECRET is not set" | `.env` missing or the service's `WorkingDirectory` is not the repo root |
 | API starts but every call returns 500 | MySQL unreachable: check `DB_*` and that the DB host allows the VPS's IP |
+| A tab says a table "does not exist in the database" | `npm run migrate` has not been run since the last update |
+| Uploading a recording fails with 413 | `client_max_body_size` in nginx is smaller than the file |
+| "AI is not configured yet" | No AI key saved in Admin > Settings |
+| Cashfree "rejected the App ID / Secret Key" | Test keys with Test Mode off, or live keys with it on |
 | Camera / microphone never prompts | Site opened over HTTP, or `Permissions-Policy` blocks them |

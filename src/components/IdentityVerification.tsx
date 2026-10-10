@@ -300,23 +300,7 @@ export const IdentityVerification: React.FC<IdentityVerificationProps> = ({
 
       if (dbError) throw dbError;
 
-      // Create notification for all admins
-      const { data: adminUsers } = await supabase
-        .from('user_roles')
-        .select('user_id')
-        .eq('role', 'admin');
-
-      if (adminUsers && adminUsers.length > 0) {
-        const notifications = adminUsers.map(admin => ({
-          user_id: admin.user_id,
-          title: 'New Identity Verification Request',
-          message: `${fullName} (${relation}) has requested verification for case access.`,
-          type: 'verification',
-          related_case_id: caseId,
-        }));
-
-        await supabase.from('notifications').insert(notifications);
-      }
+      // Admins are notified by the server when the request is saved.
 
       toast({
         title: 'Verification Submitted',

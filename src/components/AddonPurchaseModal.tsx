@@ -15,6 +15,14 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Wallet, CreditCard, IndianRupee, Loader2 } from 'lucide-react';
 import { WalletTopUp } from './WalletTopUp';
+import { Input } from '@/components/ui/input';
+import {
+  fetchActiveGateway,
+  isValidIndianMobile,
+  redirectToCashfree,
+  rememberedPhone,
+  rememberPhone,
+} from '@/lib/cashfree';
 
 const API_URL = getApiUrl();
 
@@ -40,12 +48,15 @@ export const AddonPurchaseModal: React.FC<AddonPurchaseModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [showTopUp, setShowTopUp] = useState(false);
   const [addon, setAddon] = useState<any>(null);
+  const [gateway, setGateway] = useState<'cashfree' | null>(null);
+  const [phone, setPhone] = useState(rememberedPhone());
   const { toast } = useToast();
 
   useEffect(() => {
     if (open) {
       fetchAddon();
       fetchWalletBalance();
+      fetchActiveGateway().then((active) => setGateway(active.gateway));
     }
   }, [open, addonSlug]);
 
@@ -112,6 +123,25 @@ export const AddonPurchaseModal: React.FC<AddonPurchaseModalProps> = ({
       return;
     }
 
+    if (paymentMethod === 'gateway') {
+      if (!gateway) {
+        toast({
+          title: 'Payment Gateway Not Available',
+          description: 'Online payment is not switched on yet. Please pay from your wallet.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      if (!isValidIndianMobile(phone)) {
+        toast({
+          title: 'Mobile Number Required',
+          description: 'Enter a valid 10-digit mobile number. The payment gateway needs it.',
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       const authSession = localStorage.getItem('auth_session');
@@ -150,7 +180,9 @@ export const AddonPurchaseModal: React.FC<AddonPurchaseModalProps> = ({
         },
         body: JSON.stringify({
           amount: price,
-          gateway: paymentMethod === 'wallet' ? 'wallet' : 'razorpay',
+          gateway: paymentMethod === 'wallet' ? 'wallet' : gateway,
+          type: 'addon_payment',
+          customer_phone: paymentMethod === 'gateway' ? phone : null,
           metadata,
         }),
       });
@@ -161,25 +193,19 @@ export const AddonPurchaseModal: React.FC<AddonPurchaseModalProps> = ({
         throw new Error(data.error || 'Failed to create payment');
       }
 
-      // Check payment status
-      if (data.status === 'completed' || (paymentMethod === 'wallet' && data.id)) {
-        // Payment successful
+      if (data.status === 'completed') {
         toast({
           title: 'Purchase Successful',
           description: `You have successfully purchased ${name}!`,
         });
         onClose();
         if (onSuccess) onSuccess();
-      } else if (data.status === 'failed') {
-        // Payment failed
-        throw new Error(data.failure_reason || 'Payment failed');
+      } else if (data.payment_session_id) {
+        // Online payment: continue on Cashfree's page.
+        rememberPhone(phone);
+        await redirectToCashfree(data);
       } else {
-        // Payment gateway - show redirect message
-        toast({
-          title: 'Redirecting to Payment',
-          description: 'You will be redirected to complete the payment.',
-        });
-        // TODO: Redirect to payment gateway URL when implemented
+        throw new Error(data.failure_reason || 'Payment failed');
       }
     } catch (error: any) {
       console.error('Purchase error:', error);
@@ -257,14 +283,30 @@ export const AddonPurchaseModal: React.FC<AddonPurchaseModalProps> = ({
                     )}
                   </Label>
                 </div>
-                <div className="flex items-center space-x-2 p-3 border rounded-lg hover:bg-muted/50 cursor-pointer">
-                  <RadioGroupItem value="gateway" id="gateway" />
+                <div className={`flex items-center space-x-2 p-3 border rounded-lg ${gateway ? 'hover:bg-muted/50 cursor-pointer' : 'opacity-50'}`}>
+                  <RadioGroupItem value="gateway" id="gateway" disabled={!gateway} />
                   <Label htmlFor="gateway" className="flex-1 cursor-pointer flex items-center gap-2">
                     <CreditCard className="w-4 h-4" />
-                    <span>Payment Gateway</span>
+                    <span>{gateway ? 'Card / UPI / Net Banking (Cashfree)' : 'Payment Gateway'}</span>
+                    {!gateway && (
+                      <Badge variant="outline" className="ml-auto">Not available</Badge>
+                    )}
                   </Label>
                 </div>
               </RadioGroup>
+              {paymentMethod === 'gateway' && gateway && (
+                <div className="space-y-1">
+                  <Label htmlFor="addon_phone">Mobile number for payment</Label>
+                  <Input
+                    id="addon_phone"
+                    type="tel"
+                    inputMode="numeric"
+                    placeholder="10-digit mobile number"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                  />
+                </div>
+              )}
             </div>
           </div>
 

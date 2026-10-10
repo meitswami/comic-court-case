@@ -17,6 +17,14 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { Wallet, CreditCard, IndianRupee, Loader2, Check, Info } from 'lucide-react';
 import { WalletTopUp } from './WalletTopUp';
+import { apiFetch } from '@/lib/api';
+import {
+  fetchActiveGateway as loadActiveGateway,
+  isValidIndianMobile,
+  redirectToCashfree,
+  rememberedPhone,
+  rememberPhone,
+} from '@/lib/cashfree';
 
 interface Addon {
   id: string;
@@ -49,8 +57,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<'wallet' | 'gateway'>('wallet');
   const [walletBalance, setWalletBalance] = useState(0);
   const [addons, setAddons] = useState<Addon[]>([]);
-  const [activeGateway, setActiveGateway] = useState<'razorpay' | 'phonepe' | null>(null);
+  const [activeGateway, setActiveGateway] = useState<'cashfree' | null>(null);
   const [callbackNumber, setCallbackNumber] = useState('');
+  const [paymentPhone, setPaymentPhone] = useState(rememberedPhone());
   const [loading, setLoading] = useState(false);
   const [showTopUp, setShowTopUp] = useState(false);
   const { toast } = useToast();
@@ -90,26 +99,24 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         .order('price', { ascending: true });
 
       if (error) throw error;
-      setAddons(data || []);
+      // Feature add-ons (RTI tutorial, case-strength suggestions) are bought
+      // where they are used, not as part of a hearing.
+      const standalone = ['case-strength-suggestions', 'rti-tutorial'];
+      setAddons((data || []).filter((addon: Addon) => !standalone.includes(addon.code)));
     } catch (error: any) {
       console.error('Error fetching addons:', error);
     }
   };
 
   const fetchActiveGateway = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('payment_gateway_settings')
-        .select('gateway')
-        .eq('is_active', true)
-        .single();
-
-      if (error && error.code !== 'PGRST116') throw error;
-      setActiveGateway(data?.gateway || null);
-    } catch (error: any) {
-      console.error('Error fetching active gateway:', error);
-    }
+    const active = await loadActiveGateway();
+    setActiveGateway(active.gateway);
   };
+
+  // A promo discount was worked out for a particular selection.
+  useEffect(() => {
+    setPromoDiscount(0);
+  }, [lawyerType, selectedAddons]);
 
   const calculateTotal = () => {
     let total = COURT_HEARING_FEE;
@@ -133,18 +140,31 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   const handlePromoCodeApply = async () => {
     if (!promoCode.trim()) return;
+    if (!lawyerType) {
+      toast({
+        title: 'Selection Required',
+        description: 'Choose a lawyer option first so the discount can be worked out.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     try {
-      const totalBeforeDiscount = calculateTotal();
-      // This would be validated on the server, but we can check format here
+      const subtotal =
+        lawyerType === 'ai_lawyer' ? calculateTotal() + promoDiscount : COURT_HEARING_FEE;
+      const result = await apiFetch<{ discount: number }>('/payments/promo/preview', {
+        body: { code: promoCode.trim(), amount: subtotal },
+      });
+      setPromoDiscount(result.discount || 0);
       toast({
-        title: 'Promo Code',
-        description: 'Promo code will be validated during payment.',
+        title: 'Promo Code Applied',
+        description: `You save ₹${Number(result.discount || 0).toFixed(2)}.`,
       });
     } catch (error: any) {
+      setPromoDiscount(0);
       toast({
-        title: 'Error',
-        description: error.message,
+        title: 'Promo Code',
+        description: error.message || 'This promo code could not be applied.',
         variant: 'destructive',
       });
     }
@@ -169,9 +189,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       return;
     }
 
-    const total = calculateTotal();
-    const paymentNeeded = lawyerType === 'ai_lawyer' ? total : COURT_HEARING_FEE;
-
     // Check if wallet has enough balance
     if (paymentMethod === 'wallet' && walletBalance < paymentNeeded) {
       toast({
@@ -192,36 +209,52 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       return;
     }
 
+    if (paymentMethod === 'gateway' && !isValidIndianMobile(paymentPhone)) {
+      toast({
+        title: 'Mobile Number Required',
+        description: 'Enter a valid 10-digit mobile number. The payment gateway needs it.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setLoading(true);
     try {
-      // Create payment
+      // The server works out the price from these choices and takes the payment.
       const { data: paymentData, error: paymentError } = await supabase.functions.invoke('create-payment', {
-          body: {
-          amount: paymentNeeded,
+        body: {
           gateway: paymentMethod === 'wallet' ? 'wallet' : activeGateway,
           type: 'hearing_payment',
           case_id: caseId,
           lawyer_type: lawyerType,
           addon_ids: selectedAddons,
-          promo_code: promoCode || null,
+          promo_code: promoDiscount > 0 ? promoCode : null,
           callback_number: lawyerType === 'actual_lawyer' ? callbackNumber : null,
+          customer_phone: paymentMethod === 'gateway' ? paymentPhone : null,
         },
       });
 
       if (paymentError) throw paymentError;
 
-      if (paymentData?.status === 'completed') {
-        // Payment successful, create hearing session
-        await createHearingSession(paymentData.payment_id);
-      } else if (paymentData?.payment_id) {
-        // Redirect to payment gateway (for Razorpay/PhonePe)
-        // In production, this would open payment gateway URL
+      if (paymentData?.status === 'completed' && paymentData?.session?.id) {
+        // Paid from the wallet: the server has already created the court session.
         toast({
-          title: 'Payment Pending',
-          description: 'Redirecting to payment gateway...',
+          title: 'Payment Successful!',
+          description: `Court session created. Code: ${paymentData.session.court_code}`,
         });
-        // TODO: Implement payment gateway redirect
-        // window.location.href = paymentData.payment_url;
+        onPaymentComplete(paymentData.session.id);
+        onClose();
+      } else if (paymentData?.payment_session_id) {
+        // Online payment: continue on Cashfree's page. The court session is
+        // created once Cashfree confirms the payment.
+        rememberPhone(paymentPhone);
+        toast({
+          title: 'Opening Payment Page',
+          description: 'You are being taken to Cashfree to complete the payment.',
+        });
+        await redirectToCashfree(paymentData);
+      } else {
+        throw new Error('The payment could not be started. Please try again.');
       }
     } catch (error: any) {
       console.error('Checkout error:', error);
@@ -235,71 +268,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     }
   };
 
-  const createHearingSession = async (paymentId: string) => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('User not authenticated');
-
-      // Generate court code
-      const courtCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-
-      const total = calculateTotal();
-      const sessionData: any = {
-        case_id: caseId,
-        court_code: courtCode,
-        status: 'scheduled',
-        payment_status: 'completed',
-        payment_id: paymentId,
-        court_hearing_fee: COURT_HEARING_FEE,
-        lawyer_type: lawyerType,
-        total_fee: total,
-        payment_method: paymentMethod === 'wallet' ? 'wallet' : activeGateway,
-      };
-
-      if (lawyerType === 'ai_lawyer') {
-        sessionData.ai_lawyer_fee = AI_LAWYER_FEE;
-      } else {
-        sessionData.actual_lawyer_consultation_requested = true;
-        sessionData.actual_lawyer_callback_number = callbackNumber;
-      }
-
-      const { data: session, error: sessionError } = await supabase
-        .from('court_sessions')
-        .insert(sessionData)
-        .select()
-        .single();
-
-      if (sessionError) throw sessionError;
-
-      // Create addon records for all selected addons
-      if (selectedAddons.length > 0) {
-        const addonRecords = selectedAddons.map(addonId => {
-          const addon = addons.find(a => a.id === addonId);
-          return {
-            case_id: caseId,
-            hearing_session_id: session.id,
-            addon_id: addonId,
-            user_id: user.id,
-            price: addon?.price || 0,
-            payment_id: paymentId,
-          };
-        });
-        await supabase.from('case_addons').insert(addonRecords);
-      }
-
-      toast({
-        title: 'Payment Successful!',
-        description: `Court session created. Code: ${courtCode}`,
-      });
-
-      onPaymentComplete(session.id);
-      onClose();
-    } catch (error: any) {
-      throw error;
-    }
-  };
-
-  const paymentNeeded = lawyerType === 'ai_lawyer' ? calculateTotal() : COURT_HEARING_FEE;
+  const paymentNeeded =
+    lawyerType === 'ai_lawyer' ? calculateTotal() : Math.max(0, COURT_HEARING_FEE - promoDiscount);
   const canPayWithWallet = walletBalance >= paymentNeeded;
 
   return (
@@ -458,7 +428,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <CreditCard className="w-4 h-4" />
-                        <span>{activeGateway ? activeGateway.charAt(0).toUpperCase() + activeGateway.slice(1) : 'Payment Gateway'}</span>
+                        <span>{activeGateway ? 'Card / UPI / Net Banking (Cashfree)' : 'Payment Gateway'}</span>
                       </div>
                       {!activeGateway && (
                         <Badge variant="destructive">Not Available</Badge>
@@ -467,6 +437,19 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   </Label>
                 </div>
               </RadioGroup>
+              {paymentMethod === 'gateway' && activeGateway && (
+                <div className="space-y-1">
+                  <Label htmlFor="payment_phone">Mobile number for payment</Label>
+                  <Input
+                    id="payment_phone"
+                    type="tel"
+                    inputMode="numeric"
+                    placeholder="10-digit mobile number"
+                    value={paymentPhone}
+                    onChange={(e) => setPaymentPhone(e.target.value)}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Price Summary */}

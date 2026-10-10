@@ -13,6 +13,7 @@
     "server:dev": "tsx watch server/index.js",
     "start": "node scripts/start-server.js",
     "start:prod": "npx concurrently \"npm run server\" \"npm run dev\" --names \"SERVER,FRONTEND\" --prefix-colors \"cyan,yellow\"",
+    "migrate": "node scripts/migrate.js",
     "create-test-data": "node scripts/create-test-data.js",
     "add-case-strength-rti-addons": "node scripts/add-case-strength-rti-addons.js"
   },

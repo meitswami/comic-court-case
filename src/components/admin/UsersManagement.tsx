@@ -21,7 +21,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { apiFetch } from '@/lib/api';
 import {
   Users,
   Search,
@@ -39,6 +39,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 interface User {
   id: string;
   email: string;
+  display_name?: string;
   created_at: string;
   email_confirmed_at: string | null;
   wallet_balance?: number;
@@ -68,6 +69,7 @@ export const UsersManagement: React.FC = () => {
       const filtered = users.filter(
         (u) =>
           u.email.toLowerCase().includes(query) ||
+          (u.display_name || '').toLowerCase().includes(query) ||
           u.id.toLowerCase().includes(query)
       );
       setFilteredUsers(filtered);
@@ -79,37 +81,16 @@ export const UsersManagement: React.FC = () => {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      // Fetch users from auth.users (requires admin access)
-      // Note: Direct access to auth.users might require service role
-      // For now, we'll fetch from profiles and user_roles
-      const { data: profiles, error: profilesError } = await supabase
-        .from('profiles')
-        .select('user_id, display_name');
-
-      const { data: roles, error: rolesError } = await supabase
-        .from('user_roles')
-        .select('user_id, role');
-
-      const { data: wallets, error: walletsError } = await supabase
-        .from('user_wallets')
-        .select('user_id, balance');
-
-      if (profilesError) throw profilesError;
-
-      // Get user emails from auth (this might require admin function)
-      // For now, we'll use a combination approach
-      const usersList: User[] = (profiles || []).map((profile: any) => {
-        const role = roles?.find((r: any) => r.user_id === profile.user_id);
-        const wallet = wallets?.find((w: any) => w.user_id === profile.user_id);
-        return {
-          id: profile.user_id,
-          email: profile.user_id, // Will need to get actual email
-          created_at: '',
-          email_confirmed_at: null,
-          wallet_balance: wallet?.balance || 0,
-          role: role?.role || 'user',
-        };
-      });
+      const data = await apiFetch<any[]>('/admin/users');
+      const usersList: User[] = (data || []).map((user) => ({
+        id: user.id,
+        email: user.email,
+        display_name: user.display_name || '',
+        created_at: user.created_at || '',
+        email_confirmed_at: null,
+        wallet_balance: Number(user.wallet_balance) || 0,
+        role: user.role || 'user',
+      }));
 
       setUsers(usersList);
       setFilteredUsers(usersList);
@@ -117,7 +98,7 @@ export const UsersManagement: React.FC = () => {
       console.error('Error fetching users:', error);
       toast({
         title: 'Error',
-        description: 'Failed to fetch users.',
+        description: error.message || 'Failed to fetch users.',
         variant: 'destructive',
       });
     } finally {
@@ -136,15 +117,17 @@ export const UsersManagement: React.FC = () => {
     }
 
     try {
-      // Create user via Supabase Auth (requires admin/service role)
-      // This would typically be done via an edge function with service role
+      await apiFetch('/admin/users', {
+        body: { email: newUserEmail.trim(), password: newUserPassword },
+      });
       toast({
-        title: 'Note',
-        description: 'User creation requires admin edge function. Please use Supabase dashboard or implement admin function.',
+        title: 'User Created',
+        description: `${newUserEmail.trim()} can now sign in.`,
       });
       setShowCreateModal(false);
       setNewUserEmail('');
       setNewUserPassword('');
+      fetchUsers();
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -156,21 +139,7 @@ export const UsersManagement: React.FC = () => {
 
   const handleUpdateRole = async (userId: string, newRole: string) => {
     try {
-      // Remove existing roles
-      await supabase
-        .from('user_roles')
-        .delete()
-        .eq('user_id', userId);
-
-      // Add new role
-      const { error } = await supabase
-        .from('user_roles')
-        .insert({
-          user_id: userId,
-          role: newRole,
-        });
-
-      if (error) throw error;
+      await apiFetch(`/admin/users/${userId}/role`, { method: 'PUT', body: { role: newRole } });
 
       toast({
         title: 'Success',
@@ -194,11 +163,12 @@ export const UsersManagement: React.FC = () => {
     }
 
     try {
-      // User deletion should be done via admin function or Supabase dashboard
+      await apiFetch(`/admin/users/${userId}`, { method: 'DELETE' });
       toast({
-        title: 'Note',
-        description: 'User deletion requires admin privileges. Please use Supabase dashboard.',
+        title: 'User Deleted',
+        description: 'The account has been removed.',
       });
+      fetchUsers();
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -270,7 +240,12 @@ export const UsersManagement: React.FC = () => {
               ) : (
                 filteredUsers.map((user) => (
                   <TableRow key={user.id}>
-                    <TableCell className="font-medium">{user.email}</TableCell>
+                    <TableCell className="font-medium">
+                      {user.email}
+                      {user.display_name && (
+                        <div className="text-xs text-muted-foreground font-normal">{user.display_name}</div>
+                      )}
+                    </TableCell>
                     <TableCell className="font-mono text-xs">{user.id.substring(0, 8)}...</TableCell>
                     <TableCell>
                       <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
@@ -319,7 +294,7 @@ export const UsersManagement: React.FC = () => {
           <DialogHeader>
             <DialogTitle>Create New User</DialogTitle>
             <DialogDescription>
-              Create a new user account. Password must be at least 6 characters.
+              Create a new user account. Password must be at least 8 characters.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">

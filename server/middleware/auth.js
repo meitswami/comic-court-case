@@ -94,3 +94,14 @@ export async function requireAdmin(req, res, next) {
   }
 }
 
+
+// Like authenticate, but a request without a token continues as a guest
+// (req.userId stays undefined). A token that is present but invalid is still
+// rejected, so the client knows to sign in again.
+export async function optionalAuthenticate(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return next();
+  }
+  return authenticate(req, res, next);
+}

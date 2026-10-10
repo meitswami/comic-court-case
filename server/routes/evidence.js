@@ -3,7 +3,7 @@
 
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { query, queryOne, insert } from '../lib/mysql.js';
+import { query, queryOne, insert, generateUUID } from '../lib/mysql.js';
 import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -13,6 +13,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const router = express.Router();
+
+const ALLOWED_EXTENSIONS = ['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.mp3', '.mp4', '.webm', '.wav', '.txt', '.doc', '.docx'];
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -24,8 +26,10 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    const uniqueName = `${Date.now()}-${file.originalname}`;
-    cb(null, uniqueName);
+    // Never trust the uploaded name: keep only a known-safe extension.
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const safeExt = ALLOWED_EXTENSIONS.includes(ext) ? ext : '.bin';
+    cb(null, `${Date.now()}-${generateUUID()}${safeExt}`);
   },
 });
 
@@ -42,9 +46,16 @@ router.post('/upload', authenticate, upload.single('file'), async (req, res) => 
     }
 
     const { case_id, provided_by, description } = req.body;
+
+    const ownCase = await queryOne('SELECT id FROM cases WHERE id = ? AND user_id = ?', [case_id, req.userId]);
+    if (!ownCase) {
+      fs.promises.unlink(req.file.path).catch(() => {});
+      return res.status(403).json({ error: 'You can only add evidence to your own case.' });
+    }
+
     const fileUrl = `/uploads/evidence/${req.file.filename}`;
 
-    const evidenceId = require('crypto').randomUUID();
+    const evidenceId = generateUUID();
     await insert('case_evidence', {
       id: evidenceId,
       case_id,
@@ -58,16 +69,6 @@ router.post('/upload', authenticate, upload.single('file'), async (req, res) => 
 
     const evidence = await queryOne('SELECT * FROM case_evidence WHERE id = ?', [evidenceId]);
     res.json(evidence);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// OCR Document (from ocr-document Edge Function)
-router.post('/ocr', authenticate, async (req, res) => {
-  try {
-    // TODO: Implement OCR logic
-    res.json({ message: 'OCR endpoint - to be implemented' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

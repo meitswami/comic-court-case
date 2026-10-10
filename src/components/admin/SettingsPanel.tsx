@@ -5,6 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { IntegrationSettings } from './IntegrationSettings';
 import {
   Settings,
   Mail,
@@ -241,11 +242,7 @@ export const SettingsPanel: React.FC = () => {
         </div>
       </div>
 
-      {/* Additional Settings Placeholder */}
-      <div className="border-2 border-dashed border-muted-foreground/30 rounded-xl p-6 text-center text-muted-foreground">
-        <Settings className="w-8 h-8 mx-auto mb-2 opacity-50" />
-        <p className="text-sm">More settings coming soon...</p>
-      </div>
+      <IntegrationSettings />
     </div>
   );
 };

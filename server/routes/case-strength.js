@@ -3,9 +3,28 @@
 
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { query, queryOne, insert, update } from '../lib/mysql.js';
+import { hasAdminAccess } from '../lib/auth.js';
+import { query, queryOne, insert, update, generateUUID } from '../lib/mysql.js';
 
 const router = express.Router();
+
+// The case must belong to the caller; admins may look at any case.
+async function ownCaseQuery(req, caseId) {
+  if (await hasAdminAccess(req.userId, req.tfaVerified === true)) {
+    return ['SELECT * FROM cases WHERE id = ?', [caseId]];
+  }
+  return ['SELECT * FROM cases WHERE id = ? AND user_id = ?', [caseId, req.userId]];
+}
+
+// JSON columns: MySQL returns them parsed, MariaDB as a string.
+function asJson(value) {
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return null;
+  }
+}
 
 // Analyze case strength based on uploaded documents
 router.post('/analyze/:caseId', authenticate, async (req, res) => {
@@ -15,8 +34,7 @@ router.post('/analyze/:caseId', authenticate, async (req, res) => {
 
     // Verify case belongs to user or user is admin
     const caseData = await queryOne(
-      'SELECT * FROM cases WHERE id = ? AND (uploaded_by = ? OR ? IN (SELECT id FROM users WHERE role = "admin"))',
-      [caseId, userId, userId]
+      ...(await ownCaseQuery(req, caseId))
     );
 
     if (!caseData) {
@@ -101,7 +119,7 @@ router.post('/analyze/:caseId', authenticate, async (req, res) => {
     if (existingAnalysis) {
       await update('case_strength_analyses', analysisData, { case_id: caseId });
     } else {
-      analysisData.id = require('crypto').randomUUID();
+      analysisData.id = generateUUID();
       await insert('case_strength_analyses', analysisData);
     }
 
@@ -112,8 +130,8 @@ router.post('/analyze/:caseId', authenticate, async (req, res) => {
 
     res.json({
       ...analysis,
-      analysis_data: JSON.parse(analysis.analysis_data),
-      analyzed_documents: JSON.parse(analysis.analyzed_documents),
+      analysis_data: asJson(analysis.analysis_data),
+      analyzed_documents: asJson(analysis.analyzed_documents),
     });
   } catch (error) {
     console.error('Case strength analysis error:', error);
@@ -138,8 +156,7 @@ router.get('/:caseId', authenticate, async (req, res) => {
 
     // Verify case belongs to user
     const caseData = await queryOne(
-      'SELECT * FROM cases WHERE id = ? AND (uploaded_by = ? OR ? IN (SELECT id FROM users WHERE role = "admin"))',
-      [caseId, userId, userId]
+      ...(await ownCaseQuery(req, caseId))
     );
 
     if (!caseData) {
@@ -148,8 +165,8 @@ router.get('/:caseId', authenticate, async (req, res) => {
 
     res.json({
       ...analysis,
-      analysis_data: JSON.parse(analysis.analysis_data),
-      analyzed_documents: JSON.parse(analysis.analyzed_documents),
+      analysis_data: asJson(analysis.analysis_data),
+      analyzed_documents: asJson(analysis.analyzed_documents),
     });
   } catch (error) {
     console.error('Get case strength error:', error);
@@ -165,7 +182,7 @@ router.post('/suggestions/:caseId', authenticate, async (req, res) => {
 
     // Verify case belongs to user
     const caseData = await queryOne(
-      'SELECT * FROM cases WHERE id = ? AND uploaded_by = ?',
+      'SELECT * FROM cases WHERE id = ? AND user_id = ?',
       [caseId, userId]
     );
 
@@ -201,7 +218,7 @@ router.post('/suggestions/:caseId', authenticate, async (req, res) => {
     }
 
     const currentStrength = parseFloat(analysis.strength_percentage);
-    const analyzedDocs = JSON.parse(analysis.analyzed_documents);
+    const analyzedDocs = asJson(analysis.analyzed_documents);
 
     // Generate suggestions based on missing document categories
     const suggestions = [];
@@ -220,7 +237,7 @@ router.post('/suggestions/:caseId', authenticate, async (req, res) => {
     for (const category of requiredCategories) {
       if (!categoriesPresent.has(category.name)) {
         const estimatedStrengthAfter = Math.min(currentStrength + category.impact, 100);
-        const suggestionId = require('crypto').randomUUID();
+        const suggestionId = generateUUID();
 
         await insert('case_strength_suggestions', {
           id: suggestionId,
@@ -250,7 +267,7 @@ router.post('/suggestions/:caseId', authenticate, async (req, res) => {
 
     // Additional strategy suggestions
     if (currentStrength < 60) {
-      const strategyId = require('crypto').randomUUID();
+      const strategyId = generateUUID();
       await insert('case_strength_suggestions', {
         id: strategyId,
         case_id: caseId,

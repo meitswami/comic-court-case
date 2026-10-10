@@ -27,6 +27,17 @@ function generateToken(userId, claims = {}) {
   return jwt.sign({ ...claims, userId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 }
 
+// raw_user_meta_data is JSON: MySQL returns it parsed, MariaDB as a string.
+function parseMeta(value) {
+  if (!value) return null;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return null;
+  }
+}
+
 function createSession(user, token) {
   const decoded = jwt.decode(token);
   const expiresIn = decoded && decoded.exp
@@ -115,9 +126,7 @@ export async function signIn(email, password) {
       id: userWithPassword.id,
       email: userWithPassword.email,
       email_verified: userWithPassword.email_verified,
-      raw_user_meta_data: userWithPassword.raw_user_meta_data
-        ? JSON.parse(userWithPassword.raw_user_meta_data)
-        : null,
+      raw_user_meta_data: parseMeta(userWithPassword.raw_user_meta_data),
       created_at: userWithPassword.created_at,
       updated_at: userWithPassword.updated_at,
     };

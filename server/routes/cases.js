@@ -3,7 +3,7 @@
 
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { query, queryOne, insert, update, remove } from '../lib/mysql.js';
+import { query, queryOne, insert, update, remove, generateUUID } from '../lib/mysql.js';
 import { hasAdminAccess } from '../lib/auth.js';
 
 const router = express.Router();
@@ -55,7 +55,7 @@ router.post('/', authenticate, async (req, res) => {
   try {
     const { case_number, title, description, plaintiff, defendant, category, user_role } = req.body;
     
-    const caseId = require('crypto').randomUUID();
+    const caseId = generateUUID();
     await insert('cases', {
       id: caseId,
       user_id: req.userId,
@@ -76,11 +76,38 @@ router.post('/', authenticate, async (req, res) => {
   }
 });
 
+// Fields of a case its owner may change. Anything else in the request body
+// is ignored (the body's keys must never reach the SQL as column names).
+const EDITABLE_CASE_FIELDS = [
+  'case_number',
+  'title',
+  'description',
+  'plaintiff',
+  'defendant',
+  'category',
+  'status',
+  'user_role',
+  'next_hearing_date',
+  'verdict',
+];
+
 // Update case
 router.put('/:id', authenticate, async (req, res) => {
   try {
-    await update('cases', req.body, { id: req.params.id, user_id: req.userId });
-    const updatedCase = await queryOne('SELECT * FROM cases WHERE id = ?', [req.params.id]);
+    const changes = {};
+    for (const field of EDITABLE_CASE_FIELDS) {
+      if (req.body && req.body[field] !== undefined) changes[field] = req.body[field];
+    }
+    if (Object.keys(changes).length > 0) {
+      await update('cases', changes, { id: req.params.id, user_id: req.userId });
+    }
+    const updatedCase = await queryOne(
+      'SELECT * FROM cases WHERE id = ? AND user_id = ?',
+      [req.params.id, req.userId]
+    );
+    if (!updatedCase) {
+      return res.status(404).json({ error: 'Case not found' });
+    }
     res.json(updatedCase);
   } catch (error) {
     res.status(500).json({ error: error.message });

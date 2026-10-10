@@ -102,7 +102,7 @@ The platform serves:
 ### 💰 Payments & Wallet
 - INR wallet with top-ups, addon purchases, and pay-per-hearing
 - Promo codes, invoices (PDF), and full transaction history
-- Pluggable payment-gateway settings (Razorpay / PhonePe ready)
+- Cashfree payment gateway (cards, UPI, net banking), keys set from the admin console
 
 ### 🧑‍💼 Admin Console
 - User management, wallet adjustments, promo codes
@@ -123,7 +123,7 @@ The platform serves:
 | Voice        | ElevenLabs STT + TTS (`@elevenlabs/react`)                  |
 | Face Detect  | face-api.js (TensorFlow.js)                                 |
 | PDF / QR     | jsPDF, qrcode                                               |
-| Storage      | Supabase Storage (evidence, recordings, knowledge base)     |
+| Storage      | Local disk on the server (`storage/`), served through signed links |
 | Hosting      | Own VPS: nginx (static frontend + reverse proxy) + Express  |
 
 ## 🏗️ System Architecture
@@ -171,9 +171,7 @@ The platform serves:
 │                    External Services                             │
 │   • ElevenLabs    — STT (Scribe) + TTS                           │
 │   • AI Gateway    — Gemini 2.5 Flash, GPT-4                      │
-│   • Supabase      — Storage buckets (evidence, recordings)       │
-│   • Razorpay /    — Payment gateways                             │
-│     PhonePe                                                      │
+│   • Cashfree      — Payment gateway                              │
 │   • Resend        — Transactional email                          │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -260,7 +258,7 @@ eNyayaSetu/
 │   │                             # useFaceDetection, useVoiceControls
 │   ├── integrations/
 │   │   ├── mysql/                # (legacy TS - kept for type hints)
-│   │   └── supabase/             # Storage client + types
+│   │   └── supabase/             # Data client (talks to our own API)
 │   ├── services/
 │   │   └── auth.ts               # legacy server-side TS (kept for
 │   │                             # type hints; the API uses

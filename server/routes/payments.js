@@ -1,134 +1,132 @@
 // Payments Routes
-// Handles payment-related endpoints (converted from Edge Functions)
+//
+//   POST /api/payments/create             start a payment (wallet or Cashfree)
+//   GET  /api/payments/gateway            which online gateway is live (public)
+//   POST /api/payments/promo/preview      discount a promo code would give
+//   POST /api/payments/cashfree/verify    confirm a Cashfree payment
+//   POST /api/payments/cashfree/webhook   Cashfree server-to-server notification
+//   GET  /api/payments/:id/status         status of one of your payments
+//   GET  /api/payments                    your payments
+//   GET  /api/payments/transactions       your wallet ledger
+//   GET  /api/payments/wallet/balance     your wallet balance
+//
+// Pricing, wallet debits and delivery all happen in server/lib/payments.js.
 
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { query, queryOne, insert, update, generateUUID } from '../lib/mysql.js';
+import { query, queryOne, insert, generateUUID } from '../lib/mysql.js';
+import {
+  startPayment,
+  verifyCashfree,
+  getPaymentResult,
+  getActiveGateway,
+  previewPromo,
+  PaymentError,
+} from '../lib/payments.js';
+import { getCashfreeConfig, verifyWebhookSignature, GatewayError } from '../lib/cashfree.js';
 
 const router = express.Router();
 
-// Create payment (from create-payment Edge Function)
-router.post('/create', authenticate, async (req, res) => {
+// Public address of the site, used for Cashfree's return and webhook URLs.
+export function publicBaseUrl(req) {
+  if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/+$/, '');
+  const origin = req.headers.origin;
+  if (origin && /^https?:\/\/[^/]+$/.test(origin)) return origin;
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  return host ? `${proto}://${host}` : '';
+}
+
+export function sendPaymentError(res, error, label) {
+  if (error instanceof PaymentError) {
+    return res.status(error.status).json({ error: error.message, ...error.extra });
+  }
+  if (error instanceof GatewayError) {
+    return res.status(error.status).json({ error: error.message });
+  }
+  console.error(`[Payments] ${label}:`, error);
+  return res.status(500).json({ error: 'The payment could not be processed. Please try again.' });
+}
+
+// Shared by POST /api/payments/create and the create-payment function.
+export async function handleCreatePayment(req, res) {
   try {
-    const { amount, gateway, metadata } = req.body;
-    const paymentGateway = gateway || 'wallet';
-    const metadataObj = typeof metadata === 'string' ? JSON.parse(metadata) : metadata;
-    const paymentType = metadataObj?.type || 'hearing_payment';
-    
-    const paymentId = generateUUID();
-    
-    // Create payment record
-    await insert('payments', {
-      id: paymentId,
-      user_id: req.userId,
-      amount,
-      gateway: paymentGateway,
-      status: 'pending',
-      metadata: metadata ? JSON.stringify(metadata) : null,
-    });
-    
-    // If wallet payment, process immediately
-    if (paymentGateway === 'wallet') {
-      // Check wallet balance
-      const wallet = await queryOne(
-        'SELECT id, balance FROM user_wallets WHERE user_id = ?',
-        [req.userId]
-      );
-      
-      if (!wallet) {
-        // Create wallet if it doesn't exist
-        const walletId = generateUUID();
-        await insert('user_wallets', {
-          id: walletId,
-          user_id: req.userId,
-          balance: 0.00,
-          currency: 'INR',
-        });
-        
-        await update('payments', {
-          status: 'failed',
-          failure_reason: 'Insufficient wallet balance'
-        }, { id: paymentId });
-        
-        return res.status(400).json({ 
-          error: 'Insufficient wallet balance',
-          payment_id: paymentId,
-          status: 'failed'
-        });
-      }
-      
-      const walletBalance = typeof wallet.balance === 'string' 
-        ? parseFloat(wallet.balance) 
-        : Number(wallet.balance);
-      
-      if (walletBalance < amount) {
-        // Update payment status to failed
-        await update('payments', {
-          status: 'failed',
-          failure_reason: 'Insufficient wallet balance'
-        }, { id: paymentId });
-        
-        return res.status(400).json({ 
-          error: 'Insufficient wallet balance',
-          payment_id: paymentId,
-          status: 'failed'
-        });
-      }
-      
-      // Deduct from wallet
-      const newBalance = walletBalance - amount;
-      await update('user_wallets', {
-        balance: newBalance
-      }, { id: wallet.id });
-      
-      // Create transaction record
-      const transactionId = generateUUID();
-      await insert('transactions', {
-        id: transactionId,
-        user_id: req.userId,
-        transaction_type: paymentType === 'wallet_topup' ? 'wallet_topup' : paymentType,
-        amount: -amount, // Negative for deduction
-        balance_before: walletBalance,
-        balance_after: newBalance,
-        description: `Payment for ${paymentType}`,
-        reference_id: paymentId,
-        reference_type: 'payment',
-      });
-      
-      // Update payment status to completed
-      await update('payments', {
-        status: 'completed',
-        completed_at: new Date()
-      }, { id: paymentId });
-      
-      const payment = await queryOne('SELECT * FROM payments WHERE id = ?', [paymentId]);
-      return res.json({
-        ...payment,
-        status: 'completed',
-        id: paymentId,
-        payment_id: paymentId
-      });
-    }
-    
-    // For payment gateway, return pending payment
-    const payment = await queryOne('SELECT * FROM payments WHERE id = ?', [paymentId]);
-    res.json(payment);
+    const result = await startPayment(req.user, req.body || {}, publicBaseUrl(req));
+    res.json(result);
   } catch (error) {
-    console.error('[Payment Create] Error:', error);
-    res.status(500).json({ error: error.message });
+    sendPaymentError(res, error, 'create');
+  }
+}
+
+router.post('/create', authenticate, handleCreatePayment);
+
+// Which gateway the checkout should offer. No secrets.
+router.get('/gateway', async (req, res) => {
+  try {
+    const active = await getActiveGateway();
+    if (!active || active.unsupported) return res.json({ gateway: null });
+    res.json({ gateway: active.gateway, mode: active.mode });
+  } catch (error) {
+    console.error('[Payments] gateway:', error);
+    res.json({ gateway: null });
   }
 });
 
-// Payment webhook (from payment-webhook Edge Function)
-router.post('/webhook', async (req, res) => {
+router.post('/promo/preview', authenticate, async (req, res) => {
   try {
-    // Handle payment gateway webhook
-    // Verify signature, update payment status, etc.
-    res.json({ received: true });
+    const { code, amount } = req.body || {};
+    const promo = await previewPromo(code, amount);
+    res.json({ discount: promo.discount, code: promo.code || null });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    sendPaymentError(res, error, 'promo preview');
   }
 });
+
+router.post('/cashfree/verify', authenticate, async (req, res) => {
+  try {
+    const { payment_id: paymentId, order_id: orderId } = req.body || {};
+    if (!paymentId && !orderId) return res.status(400).json({ error: 'payment_id or order_id is required' });
+    res.json(await verifyCashfree({ paymentId, orderId }, req.userId));
+  } catch (error) {
+    sendPaymentError(res, error, 'cashfree verify');
+  }
+});
+
+// Cashfree calls this from its servers. The signature proves it is Cashfree;
+// the order is then re-checked with Cashfree before anything is delivered.
+router.post('/cashfree/webhook', async (req, res) => {
+  try {
+    const config = await getCashfreeConfig();
+    const signature = req.headers['x-webhook-signature'];
+    const timestamp = req.headers['x-webhook-timestamp'];
+
+    if (!config || !verifyWebhookSignature(config, req.rawBody, timestamp, signature)) {
+      // Cashfree's dashboard "test webhook" sends an unsigned ping; answer 200
+      // to an empty body so the URL can be saved, reject everything else.
+      if (!req.rawBody || req.rawBody.length === 0) return res.json({ received: true });
+      return res.status(401).json({ error: 'Invalid signature' });
+    }
+
+    const orderId = req.body && req.body.data && req.body.data.order && req.body.data.order.order_id;
+    if (orderId) {
+      try {
+        await verifyCashfree({ orderId }, null);
+      } catch (error) {
+        if (!(error instanceof PaymentError && error.status === 404)) {
+          console.error('[Cashfree webhook] could not settle', orderId, error.message);
+          return res.status(500).json({ error: 'Temporary failure' });
+        }
+      }
+    }
+    res.json({ received: true });
+  } catch (error) {
+    console.error('[Cashfree webhook]', error);
+    res.status(500).json({ error: 'Temporary failure' });
+  }
+});
+
+// Kept so an older webhook URL does not 404.
+router.post('/webhook', (req, res) => res.json({ received: true }));
 
 // Get user payments
 router.get('/', authenticate, async (req, res) => {
@@ -159,58 +157,35 @@ router.get('/transactions', authenticate, async (req, res) => {
 // Get wallet balance
 router.get('/wallet/balance', authenticate, async (req, res) => {
   try {
-    console.log('[Wallet Balance] Fetching balance for userId:', req.userId, 'Type:', typeof req.userId);
-    
-    // Try to find wallet - ensure exact match
     const wallet = await queryOne(
-      'SELECT id, user_id, balance, currency FROM user_wallets WHERE user_id = ?',
+      'SELECT id, balance FROM user_wallets WHERE user_id = ?',
       [req.userId]
     );
-    
-    console.log('[Wallet Balance] Query result:', wallet);
-    console.log('[Wallet Balance] Query result type:', wallet ? typeof wallet.balance : 'null');
-    
+
     if (!wallet) {
-      console.log('[Wallet Balance] Wallet not found, checking all wallets for debugging...');
-      // Debug: Check if any wallets exist
-      const allWallets = await query('SELECT user_id, balance FROM user_wallets LIMIT 5');
-      console.log('[Wallet Balance] Sample wallets in DB:', allWallets);
-      
-      console.log('[Wallet Balance] Creating new wallet for userId:', req.userId);
-      // Create wallet if it doesn't exist
-      const walletId = generateUUID();
       await insert('user_wallets', {
-        id: walletId,
+        id: generateUUID(),
         user_id: req.userId,
-        balance: 0.00,
+        balance: 0.0,
         currency: 'INR',
       });
-      return res.json({ balance: 0.00 });
+      return res.json({ balance: 0.0 });
     }
-    
-    // Parse balance - handle decimal/string conversion
-    // MySQL DECIMAL types are returned as strings, so parse it
-    let balanceValue = 0.00;
-    if (wallet.balance !== null && wallet.balance !== undefined) {
-      balanceValue = typeof wallet.balance === 'string' 
-        ? parseFloat(wallet.balance) 
-        : Number(wallet.balance);
-    }
-    
-    // Ensure it's a valid number
-    if (isNaN(balanceValue)) {
-      balanceValue = 0.00;
-    }
-    
-    console.log('[Wallet Balance] Returning balance:', balanceValue);
-    
-    res.json({ balance: balanceValue });
+
+    const balance = Number(wallet.balance);
+    res.json({ balance: Number.isNaN(balance) ? 0.0 : balance });
   } catch (error) {
     console.error('[Wallet Balance] Error:', error);
-    console.error('[Wallet Balance] Error stack:', error.stack);
     res.status(500).json({ error: error.message });
   }
 });
 
-export default router;
+router.get('/:id/status', authenticate, async (req, res) => {
+  try {
+    res.json(await getPaymentResult(req.params.id, req.userId));
+  } catch (error) {
+    sendPaymentError(res, error, 'status');
+  }
+});
 
+export default router;

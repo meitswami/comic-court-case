@@ -11,6 +11,7 @@ import Dashboard from "./pages/Dashboard";
 import Court from "./pages/Court";
 import Pricing from "./pages/Pricing";
 import RTI from "./pages/RTI";
+import PaymentReturn from "./pages/PaymentReturn";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -31,6 +32,7 @@ const App = () => (
             <Route path="/court/:sessionId" element={<Court />} />
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/rti" element={<RTI />} />
+            <Route path="/payment/return" element={<PaymentReturn />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

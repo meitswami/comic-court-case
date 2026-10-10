@@ -53,8 +53,11 @@ export const StartHearingVerification: React.FC<StartHearingVerificationProps> =
       if (error) throw error;
       setSession(data);
       
-      // Check if OTP was already sent
-      if (data?.actual_lawyer_otp) {
+      // An unexpired OTP has already been emailed to the lawyer
+      if (
+        data?.actual_lawyer_otp_expires_at &&
+        new Date(data.actual_lawyer_otp_expires_at) > new Date()
+      ) {
         setOtpSent(true);
       }
     } catch (error: any) {
@@ -127,28 +130,11 @@ export const StartHearingVerification: React.FC<StartHearingVerificationProps> =
 
     setVerifying(true);
     try {
-      // Verify OTP
-      if (session?.actual_lawyer_otp !== otp) {
-        throw new Error('Invalid OTP');
-      }
-
-      // Check if OTP expired
-      if (session?.actual_lawyer_otp_expires_at) {
-        const expiresAt = new Date(session.actual_lawyer_otp_expires_at);
-        if (new Date() > expiresAt) {
-          throw new Error('OTP has expired. Please request a new one.');
-        }
-      }
-
-      // Mark hearing as started
-      await supabase
-        .from('court_sessions')
-        .update({ 
-          hearing_started: true,
-          status: 'in_progress',
-          started_at: new Date().toISOString(),
-        })
-        .eq('id', sessionId);
+      // The server checks the code; it is never sent to the browser.
+      const { error } = await supabase.functions.invoke('verify-lawyer-otp', {
+        body: { session_id: sessionId, otp: otp.trim() },
+      });
+      if (error) throw error;
 
       toast({
         title: 'Verification Successful!',
