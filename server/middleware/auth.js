@@ -4,7 +4,14 @@
 import jwt from 'jsonwebtoken';
 import { queryOne } from '../lib/mysql.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const PLACEHOLDER_SECRET = 'your-secret-key-change-in-production';
+
+// Fail closed: never verify tokens against a missing or well-known secret,
+// otherwise anyone could forge a session token.
+function jwtSecret() {
+  const secret = process.env.JWT_SECRET;
+  return secret && secret !== PLACEHOLDER_SECRET ? secret : null;
+}
 
 export async function authenticate(req, res, next) {
   try {
@@ -15,9 +22,14 @@ export async function authenticate(req, res, next) {
     }
 
     const token = authHeader.substring(7);
-    
+    const secret = jwtSecret();
+    if (!secret) {
+      console.error('[Auth] JWT_SECRET is not configured; refusing to verify tokens.');
+      return res.status(500).json({ error: 'Server authentication is not configured' });
+    }
+
     try {
-      const decoded = jwt.verify(token, JWT_SECRET);
+      const decoded = jwt.verify(token, secret, { algorithms: ['HS256'] });
       const userId = decoded.userId;
 
       if (!userId) {
@@ -50,7 +62,6 @@ export async function authenticate(req, res, next) {
     } catch (error) {
       console.error('[Auth] Token verification failed:', error.message);
       console.error('[Auth] Token (first 20 chars):', token.substring(0, 20));
-      console.error('[Auth] JWT_SECRET configured:', !!JWT_SECRET);
       return res.status(401).json({ error: 'Invalid token' });
     }
   } catch (error) {

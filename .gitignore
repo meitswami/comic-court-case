@@ -29,3 +29,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Case-preparation document storage (confidential; never commit)
+storage/

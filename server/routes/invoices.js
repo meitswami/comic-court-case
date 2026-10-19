@@ -1,6 +1,7 @@
 // Invoice Routes
 // Handles invoice-related endpoints
 
+import { randomUUID } from 'crypto';
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { query, queryOne, insert } from '../lib/mysql.js';
@@ -15,7 +16,7 @@ router.post('/generate', authenticate, async (req, res) => {
     // Generate invoice number
     const invoiceNumber = await generateInvoiceNumber();
     
-    const invoiceId = require('crypto').randomUUID();
+    const invoiceId = randomUUID();
     await insert('invoices', {
       id: invoiceId,
       invoice_number: invoiceNumber,

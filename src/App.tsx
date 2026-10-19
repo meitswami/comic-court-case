@@ -11,6 +11,8 @@ import Dashboard from "./pages/Dashboard";
 import Court from "./pages/Court";
 import Pricing from "./pages/Pricing";
 import RTI from "./pages/RTI";
+import CasePrepList from "./pages/CasePrepList";
+import CasePrepWorkspace from "./pages/CasePrepWorkspace";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -31,6 +33,8 @@ const App = () => (
             <Route path="/court/:sessionId" element={<Court />} />
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/rti" element={<RTI />} />
+            <Route path="/workspaces" element={<CasePrepList />} />
+            <Route path="/workspaces/:id" element={<CasePrepWorkspace />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

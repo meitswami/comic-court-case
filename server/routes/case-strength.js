@@ -1,6 +1,7 @@
 // Case Strength Analysis Routes
 // Handles case strength analysis and improvement suggestions
 
+import { randomUUID } from 'crypto';
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { query, queryOne, insert, update } from '../lib/mysql.js';
@@ -101,7 +102,7 @@ router.post('/analyze/:caseId', authenticate, async (req, res) => {
     if (existingAnalysis) {
       await update('case_strength_analyses', analysisData, { case_id: caseId });
     } else {
-      analysisData.id = require('crypto').randomUUID();
+      analysisData.id = randomUUID();
       await insert('case_strength_analyses', analysisData);
     }
 
@@ -220,7 +221,7 @@ router.post('/suggestions/:caseId', authenticate, async (req, res) => {
     for (const category of requiredCategories) {
       if (!categoriesPresent.has(category.name)) {
         const estimatedStrengthAfter = Math.min(currentStrength + category.impact, 100);
-        const suggestionId = require('crypto').randomUUID();
+        const suggestionId = randomUUID();
 
         await insert('case_strength_suggestions', {
           id: suggestionId,
@@ -250,7 +251,7 @@ router.post('/suggestions/:caseId', authenticate, async (req, res) => {
 
     // Additional strategy suggestions
     if (currentStrength < 60) {
-      const strategyId = require('crypto').randomUUID();
+      const strategyId = randomUUID();
       await insert('case_strength_suggestions', {
         id: strategyId,
         case_id: caseId,

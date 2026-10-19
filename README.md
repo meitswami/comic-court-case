@@ -93,6 +93,13 @@ The platform serves:
   presentation, adjournment requests
 - Hand-raise, witness requests, hearing timer
 
+### 📂 Case Preparation Workspace
+- Upload FIRs, chargesheets, notices and agreements (PDF, images, text)
+- AI-extracted facts that each link to the exact page and passage they came from; anything the server cannot find in the document is labelled **unverified**
+- Chronology, issue spotting, statute references found in the papers (English and Hindi), and an IPC→BNS / CrPC→BNSS transition check
+- Editable case brief with a mandatory human review and approval step; Markdown and print/PDF export
+- Encrypted, owner-only document storage. Details: [docs/CASE_PREP.md](docs/CASE_PREP.md)
+
 ### 💼 New Features
 - **Case Strength Analysis** — instant AI-powered % strength from your
   uploaded documents (analysis is free, AI suggestions are an addon).

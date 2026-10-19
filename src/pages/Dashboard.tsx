@@ -29,6 +29,7 @@ import {
   Download,
   IndianRupee,
   Receipt,
+  FolderOpen,
 } from 'lucide-react';
 import logo from '@/assets/logo.png';
 import { CaseDetailModal } from '@/components/admin/CaseDetailModal';
@@ -284,6 +285,10 @@ const Dashboard = () => {
             <Button variant="ghost" size="sm" onClick={() => setShowTransactions(true)}>
               <Receipt className="w-4 h-4 mr-2" />
               Transactions
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/workspaces')}>
+              <FolderOpen className="w-4 h-4 mr-2" />
+              Case prep
             </Button>
             <Button variant="ghost" size="sm" onClick={() => navigate('/pricing')}>
               <IndianRupee className="w-4 h-4 mr-2" />

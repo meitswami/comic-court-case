@@ -1,6 +1,7 @@
 // Cases Routes
 // Handles case-related endpoints
 
+import { randomUUID } from 'crypto';
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { query, queryOne, insert, update, remove } from '../lib/mysql.js';
@@ -55,7 +56,7 @@ router.post('/', authenticate, async (req, res) => {
   try {
     const { case_number, title, description, plaintiff, defendant, category, user_role } = req.body;
     
-    const caseId = require('crypto').randomUUID();
+    const caseId = randomUUID();
     await insert('cases', {
       id: caseId,
       user_id: req.userId,

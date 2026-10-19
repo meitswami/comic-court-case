@@ -147,6 +147,38 @@ sudo nginx -t && sudo systemctl reload nginx
 HTTPS is required, not optional: browsers block the camera and
 microphone on plain HTTP.
 
+## 3a. Case preparation workspace
+
+The `/workspaces` feature stores confidential case papers. Before enabling it:
+
+1. Apply `mysql/migrations/012_case_prep_workspace.sql` (additive; no existing table changes).
+2. Set `CASE_PREP_ENCRYPTION_KEY` in `.env` (`openssl rand -base64 32`). In production
+   the API refuses uploads without it. Back the key up somewhere safe and separate
+   from the server: without it, stored documents cannot be decrypted.
+3. Optionally set `CASE_PREP_STORAGE_DIR` (default `storage/case-prep` in the repo,
+   which is git-ignored). Give the service user access and include it in backups:
+   ```bash
+   sudo mkdir -p /var/lib/enyayasetu/case-prep
+   sudo chown www-data:www-data /var/lib/enyayasetu/case-prep && sudo chmod 700 /var/lib/enyayasetu/case-prep
+   ```
+4. Configure the AI provider (`AI_API_BASE_URL`, `AI_MODEL`, `AI_API_KEY`, `AI_VISION`;
+   see `.env.example`). Without it, uploads and review still work but analysis
+   returns a clear "not configured" message instead of output.
+5. Allow larger request bodies for document uploads only (up to 10 files of 15 MB):
+   ```nginx
+   location ~ ^/api/case-prep/workspaces/[^/]+/documents$ {
+       client_max_body_size 160m;
+       proxy_pass http://127.0.0.1:3000;
+       proxy_set_header Host $host;
+       proxy_set_header X-Real-IP $remote_addr;
+       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+       proxy_read_timeout 120s;
+   }
+   ```
+
+Analysis runs inside the API process; if the service restarts mid-analysis, the
+run is marked failed on boot and can be started again from the workspace.
+
 ## 4. Deploying an update
 
 ```bash
@@ -178,3 +210,6 @@ Then sign in once as a normal user and once as an admin.
 | Login returns "JWT_SECRET is not set" | `.env` missing or the service's `WorkingDirectory` is not the repo root |
 | API starts but every call returns 500 | MySQL unreachable: check `DB_*` and that the DB host allows the VPS's IP |
 | Camera / microphone never prompts | Site opened over HTTP, or `Permissions-Policy` blocks them |
+| Case-prep upload says "Secure storage is not configured" | `CASE_PREP_ENCRYPTION_KEY` missing or not 32 bytes |
+| Case-prep upload fails with 413 | nginx `client_max_body_size` for the documents route (section 3a) |
+| "No AI provider is configured" in a workspace | `AI_API_BASE_URL` / `AI_MODEL` not set, or a remote URL uses plain HTTP |
