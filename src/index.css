@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Comic+Neue:wght@400;700&family=Playfair+Display:wght@700;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -679,5 +680,79 @@
   .hover-lift:hover {
     transform: translateY(-4px);
     box-shadow: var(--comic-shadow-lg);
+  }
+}
+
+
+/* ---------------------------------------------------------------------------
+   Case preparation workspace
+   A working surface for advocates: the app's colours and header stay, but text
+   is set for reading legal material, and colour is reserved for provenance.
+   --------------------------------------------------------------------------- */
+@layer components {
+  .case-prep {
+    --cp-verified: 152 58% 46%;
+    --cp-unverified: 28 92% 58%;
+    --cp-confirmed: 48 30% 70%;
+    --cp-ai: 258 88% 74%;
+    --cp-reviewer: 48 96% 89%;
+    --cp-rule: 196 85% 58%;
+    --cp-paper: 220 33% 97%;
+    --cp-ink: 222 47% 13%;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans', 'Noto Sans Devanagari', 'Helvetica Neue', sans-serif;
+    font-size: 0.9375rem;
+    line-height: 1.55;
+  }
+  .case-prep h1:not(.brand-title), .case-prep h2, .case-prep h3, .case-prep h4 {
+    font-family: inherit;
+    letter-spacing: normal;
+    font-weight: 650;
+  }
+  .case-prep button {
+    font-family: inherit;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+  .case-prep .cp-serif {
+    font-family: 'Literata', 'Noto Serif Devanagari', Georgia, serif;
+  }
+
+  /* Provenance rail: the left edge of every fact or brief block says where it came from. */
+  .cp-rail { border-left: 3px solid hsl(var(--border)); padding-left: 0.875rem; }
+  .cp-rail[data-prov='verified'] { border-left-color: hsl(var(--cp-verified)); }
+  .cp-rail[data-prov='unverified'] { border-left: 3px dashed hsl(var(--cp-unverified)); }
+  .cp-rail[data-prov='confirmed'] { border-left: 3px dashed hsl(var(--cp-confirmed)); }
+  .cp-rail[data-prov='ai'] { border-left-color: hsl(var(--cp-ai)); }
+  .cp-rail[data-prov='reviewer'] { border-left-color: hsl(var(--cp-reviewer)); }
+  .cp-rail[data-prov='rule'] { border-left-color: hsl(var(--cp-rule)); }
+
+  .cp-prov-text[data-prov='verified'] { color: hsl(var(--cp-verified)); }
+  .cp-prov-text[data-prov='unverified'] { color: hsl(var(--cp-unverified)); }
+  .cp-prov-text[data-prov='confirmed'] { color: hsl(var(--cp-confirmed)); }
+  .cp-prov-text[data-prov='ai'] { color: hsl(var(--cp-ai)); }
+  .cp-prov-text[data-prov='reviewer'] { color: hsl(var(--cp-reviewer)); }
+  .cp-prov-text[data-prov='rule'] { color: hsl(var(--cp-rule)); }
+
+  /* The brief is a document sheet on the dark workspace. */
+  .cp-paper {
+    background: hsl(var(--cp-paper));
+    color: hsl(var(--cp-ink));
+    --border: 220 16% 80%;
+    --muted-foreground: 220 12% 38%;
+    --foreground: 222 47% 13%;
+    --input: 220 16% 82%;
+    --background: 0 0% 100%;
+    --cp-verified: 152 70% 28%;
+    --cp-unverified: 25 90% 38%;
+    --cp-confirmed: 220 10% 45%;
+    --cp-ai: 262 60% 45%;
+    --cp-reviewer: 222 47% 20%;
+    --cp-rule: 199 80% 32%;
+  }
+  .cp-highlight {
+    background: hsl(var(--cp-verified) / 0.28);
+    box-shadow: 0 0 0 2px hsl(var(--cp-verified) / 0.28);
+    border-radius: 2px;
+    color: inherit;
   }
 }

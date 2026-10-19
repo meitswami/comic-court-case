@@ -1,6 +1,7 @@
 // Evidence Routes
 // Handles evidence-related endpoints
 
+import { randomUUID } from 'crypto';
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { query, queryOne, insert } from '../lib/mysql.js';
@@ -44,7 +45,7 @@ router.post('/upload', authenticate, upload.single('file'), async (req, res) => 
     const { case_id, provided_by, description } = req.body;
     const fileUrl = `/uploads/evidence/${req.file.filename}`;
 
-    const evidenceId = require('crypto').randomUUID();
+    const evidenceId = randomUUID();
     await insert('case_evidence', {
       id: evidenceId,
       case_id,
